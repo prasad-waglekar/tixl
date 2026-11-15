@@ -604,14 +604,15 @@ internal sealed class RenderWindow : Window
     {
         var s = RenderSettings.Current;
         var modified = FormInputs.AddSegmentedButtonWithLabel(ref s.RenderMode, "Render Mode",
-                                                             "Render one video file, or a numbered sequence of image files (PNG/JPG).");
+                                                             "Render one video file, or a numbered sequence of image files (PNG/JPG/EXR).");
         FormInputs.AddVerticalSpace();
 
         if (s.RenderMode == RenderSettings.RenderModes.Video)
             modified |= DrawVideoFormatSettings();
         else
             modified |= FormInputs.AddEnumDropdown(ref s.FileFormat, "Format",
-                                                   "Image file type. PNG is lossless (larger); JPG is much smaller (no alpha).",
+                                                   "Image file type. PNG is lossless (larger); JPG is much smaller (no alpha).\n"
+                                                   + "EXR is lossless 16-bit float with alpha and keeps HDR values above 1.0 — use it for compositing and grading.",
                                                    RenderSettings.Defaults.FileFormat);
 
         return modified;
