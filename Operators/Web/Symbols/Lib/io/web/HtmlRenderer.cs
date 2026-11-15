@@ -1,4 +1,5 @@
 #nullable enable
+using System.Diagnostics;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -34,7 +35,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         var width = PickSize(resolution.Width, context.RequestedResolution.Width);
         var height = PickSize(resolution.Height, context.RequestedResolution.Height);
 
-        // Reload also restarts a crashed host or retries after a failed start (e.g. after installing it).
+        // Reload also restarts a crashed host or retries after a failed start.
         if (reloadTriggered && (_startFailed || (_client?.HostExited ?? false)))
         {
             DisposeClient();
@@ -65,9 +66,10 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _sessionUrl = null;
         }
 
+        var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
+
         if (_sessionUrl != url || _sessionTransparent != transparent)
         {
-            // New document or transparency change: (re)create the browser. Transparency is a creation-time setting in CEF.
             _client.Open(url, width, height, fps, transparent);
             _sessionUrl = url;
             _sessionTransparent = transparent;
@@ -75,20 +77,26 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _appliedHeight = height;
             _appliedFps = fps;
             _appliedPaused = false;
+            _lastSettingsSendMs = nowMs;
         }
         else
         {
-            if (width != _appliedWidth || height != _appliedHeight)
+            // Throttle continuous slider scrubs so rapid drags do not flood the host.
+            var canSendSettings = (nowMs - _lastSettingsSendMs) >= 50.0;
+
+            if ((width != _appliedWidth || height != _appliedHeight) && canSendSettings)
             {
                 _client.Resize(width, height);
                 _appliedWidth = width;
                 _appliedHeight = height;
+                _lastSettingsSendMs = nowMs;
             }
 
-            if (fps != _appliedFps)
+            if (fps != _appliedFps && canSendSettings)
             {
                 _client.SetFps(fps);
                 _appliedFps = fps;
+                _lastSettingsSendMs = nowMs;
             }
 
             if (reloadTriggered)
@@ -109,7 +117,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             {
                 _texture?.Dispose();
                 _texture = null;
-                // Device-local and filled with UpdateSubresource.
                 _texture = Texture2D.CreateTexture2D(new Texture2DDescription
                                                          {
                                                              BindFlags = BindFlags.ShaderResource,
@@ -128,7 +135,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             var dataBox = new SharpDX.DataBox(frame.Data, frame.Stride, 0);
             ResourceManager.Device.ImmediateContext.UpdateSubresource(dataBox, _texture, 0);
 
-            // A torn frame (rare) is simply replaced by the next one.
             _ = _client.IsFrameStillValid(frame);
         }
 
@@ -141,7 +147,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         return Math.Clamp(size, 16, 8192);
     }
 
-    /// <summary>Accepts http(s)/file URLs, absolute paths, TiXL asset addresses, or a folder containing index.html.</summary>
     private string? ResolveUrl(string? address, out string? error)
     {
         error = null;
@@ -251,6 +256,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private int _appliedHeight;
     private int _appliedFps;
     private bool _appliedPaused;
+    private double _lastSettingsSendMs;
 
     [Input(Guid = "3ce7bcaa-3230-41ee-a0dc-601862139ce9")]
     public readonly InputSlot<string> Path = new();

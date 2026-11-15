@@ -4,14 +4,14 @@ using System.IO.MemoryMappedFiles;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace Lib.io.web;
 
 /// <summary>
 /// TiXL-side client of TixlWebHost (the out-of-process Chromium renderer, see /WebHost).
-/// Starts the host, talks to it over a named pipe and reads rendered frames from shared memory.
-/// Everything that can block (process start, pipe I/O) happens on background threads; the operator only
-/// calls cheap methods from its Update().
+/// Starts the host, communicates via an asynchronous named pipe, and reads rendered BGRA frames
+/// from a double-buffered memory-mapped file without blocking TiXL's evaluation loop.
 /// </summary>
 internal sealed class WebHostClient : IDisposable
 {
@@ -91,11 +91,11 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
-    // ---- commands (all cheap and non-blocking) ----
+    // ---- non-blocking outbound commands ----
 
     public void Open(string url, int width, int height, int fps, bool transparent)
     {
-        lock (_sendLock)
+        lock (_stateLock)
         {
             _url = url;
             _width = width;
@@ -106,54 +106,58 @@ internal sealed class WebHostClient : IDisposable
             _hasOpen = true;
             _isLoading = true;
             _loadError = null;
-            WriteLocked(BuildOpenJson());
+            EnqueueCommand(BuildOpenJsonLocked());
         }
     }
 
     public void Resize(int width, int height)
     {
-        lock (_sendLock)
+        lock (_stateLock)
         {
             _width = width;
             _height = height;
-            WriteLocked(JsonSerializer.Serialize(new { cmd = "resize", width, height }));
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "resize", width, height }));
         }
     }
 
     public void SetFps(int fps)
     {
-        lock (_sendLock)
+        lock (_stateLock)
         {
             _fps = fps;
-            WriteLocked(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
         }
     }
 
     public void SetPaused(bool paused)
     {
-        lock (_sendLock)
+        lock (_stateLock)
         {
             _paused = paused;
-            WriteLocked(JsonSerializer.Serialize(new { cmd = "pause", value = paused }));
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "pause", value = paused }));
         }
     }
 
     public void Reload()
     {
-        lock (_sendLock)
+        lock (_stateLock)
         {
             _isLoading = true;
             _loadError = null;
-            WriteLocked("{\"cmd\":\"reload\"}");
+            EnqueueCommand("{\"cmd\":\"reload\"}");
         }
+    }
+
+    private void EnqueueCommand(string json)
+    {
+        if (_disposed)
+            return;
+
+        _outbound.Writer.TryWrite(json);
     }
 
     // ---- frames (call from the operator's update thread only) ----
 
-    /// <summary>
-    /// True when a frame newer than the last delivered one is available. The pointer stays valid until the next call
-    /// of this method or <see cref="Dispose"/>; copy it to the GPU immediately.
-    /// </summary>
     public unsafe bool TryGetFrame(out FrameInfo frame)
     {
         frame = default;
@@ -184,30 +188,59 @@ internal sealed class WebHostClient : IDisposable
         return true;
     }
 
-    /// <summary>False if the host may have overwritten the frame's slot while it was being copied (rare).</summary>
     public unsafe bool IsFrameStillValid(in FrameInfo frame)
     {
         var view = _currentView;
         return view != null && Volatile.Read(ref *(long*)view.Base) < frame.Counter + 2;
     }
 
-    // ---- background receive ----
+    // ---- background send / receive loops ----
+
+    private async Task SendLoop(StreamWriter writer, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var json in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                await writer.WriteLineAsync(json).ConfigureAwait(false);
+                await writer.FlushAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on dispose
+        }
+        catch (Exception e) when (!_disposed)
+        {
+            SetError($"Could not send command to browser host: {e.Message}");
+        }
+    }
 
     private async Task ReceiveLoop()
     {
+        CancellationTokenSource? sendCts = null;
+        Task? sendTask = null;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             await _pipe!.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
 
             var utf8 = new UTF8Encoding(false);
-            lock (_sendLock)
+            using var writer = new StreamWriter(_pipe, utf8, 1024, leaveOpen: true);
+
+            lock (_stateLock)
             {
-                _writer = new StreamWriter(_pipe, utf8, 1024, leaveOpen: true) { AutoFlush = true };
-                if (_hasOpen) // commands issued before the host connected: send the latest state once
-                    WriteLocked(BuildOpenJson());
+                // Drain queued commands issued prior to connection and emit the latest open state once.
+                while (_outbound.Reader.TryRead(out _))
+                {
+                }
+
+                if (_hasOpen)
+                    _outbound.Writer.TryWrite(BuildOpenJsonLocked());
             }
 
+            sendCts = new CancellationTokenSource();
+            sendTask = Task.Run(() => SendLoop(writer, sendCts.Token));
             _isConnected = true;
 
             using var reader = new StreamReader(_pipe, utf8, false, 4096, leaveOpen: true);
@@ -232,8 +265,19 @@ internal sealed class WebHostClient : IDisposable
         {
             SetError($"Connection to the browser host lost: {e.Message}");
         }
-
-        _isConnected = false;
+        finally
+        {
+            _isConnected = false;
+            if (sendCts != null)
+            {
+                sendCts.Cancel();
+                if (sendTask != null)
+                {
+                    try { await sendTask.ConfigureAwait(false); } catch { }
+                }
+                sendCts.Dispose();
+            }
+        }
     }
 
     private void HandleMessage(string line)
@@ -314,15 +358,7 @@ internal sealed class WebHostClient : IDisposable
             return;
 
         var code = -1;
-        try
-        {
-            code = _process?.ExitCode ?? -1;
-        }
-        catch
-        {
-            // process object already disposed
-        }
-
+        try { code = _process?.ExitCode ?? -1; } catch { }
         SetError($"The browser host exited unexpectedly (exit code {code}). Check %TEMP%\\TixlWebHost for logs.");
     }
 
@@ -332,24 +368,8 @@ internal sealed class WebHostClient : IDisposable
         Log.Warning($"[web] {message}");
     }
 
-    private string BuildOpenJson()
+    private string BuildOpenJsonLocked()
         => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
-
-    /// <summary>Must be called with <see cref="_sendLock"/> held. Silently dropped until the host has connected.</summary>
-    private void WriteLocked(string json)
-    {
-        if (_writer == null)
-            return;
-
-        try
-        {
-            _writer.WriteLine(json);
-        }
-        catch (Exception e)
-        {
-            SetError($"Could not send a command to the browser host: {e.Message}");
-        }
-    }
 
     public void Dispose()
     {
@@ -357,43 +377,16 @@ internal sealed class WebHostClient : IDisposable
             return;
 
         _disposed = true;
-
-        lock (_sendLock)
-        {
-            WriteLocked("{\"cmd\":\"close\"}");
-        }
+        _outbound.Writer.TryWrite("{\"cmd\":\"close\"}");
+        _outbound.Writer.TryComplete();
 
         var process = _process;
         var pipe = _pipe;
         _ = Task.Run(() =>
                      {
-                         try
-                         {
-                             if (process != null && !process.WaitForExit(2000))
-                                 process.Kill(true);
-                         }
-                         catch
-                         {
-                             // already gone
-                         }
-
-                         try
-                         {
-                             process?.Dispose();
-                         }
-                         catch
-                         {
-                             // ignore
-                         }
-
-                         try
-                         {
-                             pipe?.Dispose();
-                         }
-                         catch
-                         {
-                             // ignore
-                         }
+                         try { if (process != null && !process.WaitForExit(2000)) process.Kill(true); } catch { }
+                         try { process?.Dispose(); } catch { }
+                         try { pipe?.Dispose(); } catch { }
                      });
 
         _currentView?.Dispose();
@@ -435,15 +428,20 @@ internal sealed class WebHostClient : IDisposable
         private readonly MemoryMappedViewAccessor _accessor;
     }
 
-    private readonly object _sendLock = new();
+    private readonly object _stateLock = new();
     private readonly object _frameLock = new();
+    private readonly Channel<string> _outbound = Channel.CreateBounded<string>(new BoundedChannelOptions(64)
+                                                                                 {
+                                                                                     FullMode = BoundedChannelFullMode.DropOldest,
+                                                                                     SingleReader = true,
+                                                                                     SingleWriter = false
+                                                                                 });
 
     private NamedPipeServerStream? _pipe;
     private Process? _process;
-    private StreamWriter? _writer;
 
-    private FrameView? _pendingView; // written by the receive thread, swapped in by TryGetFrame
-    private FrameView? _currentView; // only touched from the operator's thread
+    private FrameView? _pendingView;
+    private FrameView? _currentView;
     private long _lastCounter;
 
     private string _url = "about:blank";

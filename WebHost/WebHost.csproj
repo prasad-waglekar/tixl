@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- TixlWebHost: out-of-process Chromium (CEF) off-screen renderer used by the TiXL Web operators.
-       Deliberately NOT part of t3.sln: it needs the CEF binaries (~200 MB), which regular TiXL builds
-       must not depend on. Build and install it with WebHost\install.ps1. -->
+  <!-- TixlWebHost: out-of-process Chromium (CEF) off-screen renderer used by the TiXL Web operators. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -16,8 +14,7 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Floating version for the very first restore (could not be verified when this was written).
-         After the first successful restore, pin the resolved version here. -->
-    <PackageReference Include="CefSharp.OffScreen.NETCore" Version="*" />
+    <!-- Pinned stable CefSharp OffScreen release for deterministic builds -->
+    <PackageReference Include="CefSharp.OffScreen.NETCore" Version="134.3.90" />
   </ItemGroup>
 </Project>

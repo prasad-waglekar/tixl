@@ -1,26 +1,4 @@
 // TixlWebHost - out-of-process Chromium (CEF, off-screen) renderer for TiXL's Web operators.
-//
-// Why a separate process: TiXL loads every operator package into its own unloadable assembly load context,
-// and CEF can only be initialized once per process and ships native binaries and a subprocess. Running the
-// browser here keeps all of that away from TiXL, and a browser crash can never take the editor down.
-//
-// Control channel: a named pipe that the TiXL operator creates (this process connects to it).
-// UTF-8 JSON, one object per line.
-//   TiXL -> host  {"cmd":"open","url":"file:///...","width":1280,"height":720,"fps":60,"transparent":false,"paused":false}
-//                 {"cmd":"reload"}  {"cmd":"resize","width":..,"height":..}  {"cmd":"fps","value":..}
-//                 {"cmd":"pause","value":true}  {"cmd":"close"}
-//   host -> TiXL  {"evt":"ready"}
-//                 {"evt":"frames","name":"..","width":..,"height":..,"slotSize":..}   (new shared frame memory)
-//                 {"evt":"loading","isLoading":true}  {"evt":"loadError","code":..,"text":"..","url":".."}
-//                 {"evt":"console","level":"..","message":"..","source":"..","line":..}  {"evt":"error","message":".."}
-//
-// Frame channel: a named memory-mapped file, re-created whenever the frame size changes.
-//   [0]  int64 frameCounter (0 = no frame yet; published last, so readers can detect new frames)
-//   [8]  int32 width   [12] int32 height   [16] int32 stride (bytes)
-//   [64] slot 0, then slot 1 (each width*height*4 bytes, BGRA, premultiplied alpha as delivered by CEF)
-// Frame n is written to slot (n & 1). A reader that sees counter >= n + 2 after copying slot (n & 1) knows the
-// slot may have been overwritten while it was copying and must treat the copy as torn.
-
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.MemoryMappedFiles;
@@ -37,8 +15,8 @@ internal static unsafe class Program
     private const int HeaderSize = 64;
     private const int MaxDimension = 8192;
 
-    private static readonly object _gate = new(); // guards browser + shared memory state
-    private static readonly object _writeLock = new(); // guards the pipe writer
+    private static readonly object _gate = new();
+    private static readonly object _writeLock = new();
     private static readonly ManualResetEventSlim _exit = new(false);
 
     private static StreamWriter? _writer;
@@ -46,6 +24,7 @@ internal static unsafe class Program
 
     private static ChromiumWebBrowser? _browser;
     private static volatile bool _paused;
+    private static long _lastConsoleSendTicks;
 
     private static MemoryMappedFile? _mmf;
     private static MemoryMappedViewAccessor? _view;
@@ -98,15 +77,7 @@ internal static unsafe class Program
         catch (Exception e)
         {
             Console.Error.WriteLine(e);
-            try
-            {
-                Shutdown();
-            }
-            catch
-            {
-                // ignore
-            }
-
+            try { Shutdown(); } catch { }
             return 1;
         }
     }
@@ -116,14 +87,12 @@ internal static unsafe class Program
         var logDir = Path.Combine(Path.GetTempPath(), "TixlWebHost");
         Directory.CreateDirectory(logDir);
 
-        // No CachePath: CEF then uses an in-memory profile, so several host processes can run side by side.
         var settings = new CefSettings
                            {
                                LogSeverity = LogSeverity.Warning,
                                LogFile = Path.Combine(logDir, $"cef-{Environment.ProcessId}.log"),
                            };
 
-        // Local project folders: let pages load sibling files (fetch/XHR of local JSON, fonts, ...).
         settings.CefCommandLineArgs.Add("allow-file-access-from-files");
         settings.CefCommandLineArgs.Add("autoplay-policy", "no-user-gesture-required");
 
@@ -146,10 +115,7 @@ internal static unsafe class Program
                                         using var parent = Process.GetProcessById(parentPid);
                                         parent.WaitForExit();
                                     }
-                                    catch
-                                    {
-                                        // parent already gone
-                                    }
+                                    catch { }
 
                                     _exit.Set();
                                 }) { IsBackground = true, Name = "parent-watch" };
@@ -165,24 +131,12 @@ internal static unsafe class Program
                 if (line.Length == 0)
                     continue;
 
-                try
-                {
-                    Handle(line);
-                }
-                catch (Exception e)
-                {
-                    Send(new { evt = "error", message = e.Message });
-                }
+                try { Handle(line); }
+                catch (Exception e) { Send(new { evt = "error", message = e.Message }); }
             }
         }
-        catch (IOException)
-        {
-            // pipe broken
-        }
-        finally
-        {
-            _exit.Set(); // pipe closed: TiXL is gone or disposed the operator
-        }
+        catch (IOException) { }
+        finally { _exit.Set(); }
     }
 
     private static void Handle(string line)
@@ -213,7 +167,6 @@ internal static unsafe class Program
                     if (_browser != null)
                         _browser.Size = new Size(Dimension(GetInt(root, "width", 1280)), Dimension(GetInt(root, "height", 720)));
                 }
-
                 break;
 
             case "fps":
@@ -223,7 +176,6 @@ internal static unsafe class Program
                     if (host != null)
                         host.WindowlessFrameRate = Math.Clamp(GetInt(root, "value", 60), 1, 240);
                 }
-
                 break;
 
             case "pause":
@@ -238,33 +190,47 @@ internal static unsafe class Program
 
     private static void Open(string url, int width, int height, int fps, bool transparent, bool paused)
     {
+        ChromiumWebBrowser? previous;
         lock (_gate)
         {
-            DisposeBrowser();
+            previous = DetachBrowserLocked();
             _paused = paused;
+        }
 
-            var browserSettings = new BrowserSettings
-                                      {
-                                          WindowlessFrameRate = fps,
-                                          BackgroundColor = transparent
-                                                                ? Cef.ColorSetARGB(0, 0, 0, 0)
-                                                                : Cef.ColorSetARGB(255, 255, 255, 255),
-                                      };
+        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
+        previous?.Dispose();
 
-            var browser = new ChromiumWebBrowser(url, browserSettings);
-            browser.Size = new Size(width, height);
-            browser.Paint += OnPaint;
-            browser.LoadingStateChanged += (_, e) => Send(new { evt = "loading", isLoading = e.IsLoading });
-            browser.LoadError += (_, e) =>
-                                 {
-                                     if (e.ErrorCode == CefErrorCode.Aborted) // superseded navigation, not an error
-                                         return;
+        var browserSettings = new BrowserSettings
+                                  {
+                                      WindowlessFrameRate = fps,
+                                      BackgroundColor = transparent
+                                                            ? Cef.ColorSetARGB(0, 0, 0, 0)
+                                                            : Cef.ColorSetARGB(255, 255, 255, 255),
+                                  };
 
-                                     Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
-                                 };
-            browser.ConsoleMessage += (_, e) =>
-                                          Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
+        var browser = new ChromiumWebBrowser(url, browserSettings);
+        browser.Size = new Size(width, height);
+        browser.Paint += OnPaint;
+        browser.LoadingStateChanged += (_, e) => Send(new { evt = "loading", isLoading = e.IsLoading });
+        browser.LoadError += (_, e) =>
+                             {
+                                 if (e.ErrorCode == CefErrorCode.Aborted)
+                                     return;
 
+                                 Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
+                             };
+        browser.ConsoleMessage += (_, e) =>
+                                  {
+                                      var now = Environment.TickCount64;
+                                      var prev = Interlocked.Read(ref _lastConsoleSendTicks);
+                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
+                                          return;
+
+                                      Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
+                                  };
+
+        lock (_gate)
+        {
             _browser = browser;
         }
     }
@@ -280,7 +246,7 @@ internal static unsafe class Program
 
             host.WasHidden(paused);
             if (!paused)
-                host.Invalidate(PaintElementType.View); // force a fresh frame after resuming
+                host.Invalidate(PaintElementType.View);
         }
     }
 
@@ -297,7 +263,7 @@ internal static unsafe class Program
         lock (_gate)
         {
             if (!ReferenceEquals(sender, _browser))
-                return; // frame from a browser that was already replaced
+                return;
 
             if (_basePtr == null || width != _frameWidth || height != _frameHeight)
                 AllocateSharedMemory(width, height);
@@ -307,7 +273,7 @@ internal static unsafe class Program
             Buffer.MemoryCopy((void*)e.BufferHandle, destination, _slotSize, _slotSize);
 
             _frameCounter = counter;
-            Volatile.Write(ref *(long*)_basePtr, counter); // publish last
+            Volatile.Write(ref *(long*)_basePtr, counter);
         }
     }
 
@@ -335,7 +301,6 @@ internal static unsafe class Program
         *(int*)(_basePtr + 12) = height;
         *(int*)(_basePtr + 16) = width * 4;
 
-        // The client opens the memory only after this message, so header and counter are already valid.
         Send(new { evt = "frames", name, width, height, slotSize = _slotSize });
     }
 
@@ -357,29 +322,29 @@ internal static unsafe class Program
         _frameHeight = 0;
     }
 
-    private static void DisposeBrowser()
+    private static ChromiumWebBrowser? DetachBrowserLocked()
     {
         var browser = _browser;
         _browser = null;
-        browser?.Dispose();
+        return browser;
     }
 
     private static void Shutdown()
     {
+        ChromiumWebBrowser? browser;
         lock (_gate)
         {
-            DisposeBrowser();
+            browser = DetachBrowserLocked();
+        }
+
+        browser?.Dispose();
+
+        lock (_gate)
+        {
             ReleaseSharedMemory();
         }
 
-        try
-        {
-            Cef.Shutdown();
-        }
-        catch
-        {
-            // best effort
-        }
+        try { Cef.Shutdown(); } catch { }
     }
 
     private static void Send(object message)
@@ -387,14 +352,8 @@ internal static unsafe class Program
         var json = JsonSerializer.Serialize(message);
         lock (_writeLock)
         {
-            try
-            {
-                _writer?.WriteLine(json);
-            }
-            catch (IOException)
-            {
-                _exit.Set();
-            }
+            try { _writer?.WriteLine(json); }
+            catch (IOException) { _exit.Set(); }
         }
     }
 
