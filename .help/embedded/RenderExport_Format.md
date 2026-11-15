@@ -2,7 +2,9 @@
 
 Choose the **file type** and **quality**.
 
-- **Render Mode** — one **video** file, or a numbered **image sequence** (PNG/JPG).
+- **Render Mode** — one **video** file, or a numbered **image sequence** (PNG/JPG/EXR).
+  **EXR** is lossless 16-bit float with alpha and keeps values above 1.0 (HDR), so it's the right choice for
+  compositing and color grading. Not every image viewer can open EXR; compositing tools and most 3D/video apps can.
 - **Codec** — the video format. **H.264** is the safe, compatible default; **HEVC** is smaller; **ProRes** is
   for handing off to an editor; **HAP** is for VJ playback. H.264/HEVC use your GPU (NVENC) when possible — the
   line under the dropdown shows which encoder your machine will use.
