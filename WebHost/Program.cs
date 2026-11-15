@@ -25,6 +25,7 @@ internal static unsafe class Program
     private static ChromiumWebBrowser? _browser;
     private static volatile bool _paused;
     private static long _lastConsoleSendTicks;
+<<<<<<< HEAD
     private static volatile bool _syncTime;
     private static double _lastTimeMs;
 
@@ -33,6 +34,8 @@ internal static unsafe class Program
     private static readonly Dictionary<string, string> _domState = new(); // key -> op as JSON array text
     private static volatile bool _pageReady;
     private static string _lastMissing = "[]";
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 
     private static MemoryMappedFile? _mmf;
     private static MemoryMappedViewAccessor? _view;
@@ -217,6 +220,7 @@ internal static unsafe class Program
         {
             previous = DetachBrowserLocked();
             _paused = paused;
+<<<<<<< HEAD
             _syncTime = syncTime;
         }
 
@@ -334,6 +338,42 @@ internal static unsafe class Program
                                       Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
                                   };
 
+=======
+        }
+
+        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
+        previous?.Dispose();
+
+        var browserSettings = new BrowserSettings
+                                  {
+                                      WindowlessFrameRate = fps,
+                                      BackgroundColor = transparent
+                                                            ? Cef.ColorSetARGB(0, 0, 0, 0)
+                                                            : Cef.ColorSetARGB(255, 255, 255, 255),
+                                  };
+
+        var browser = new ChromiumWebBrowser(url, browserSettings);
+        browser.Size = new Size(width, height);
+        browser.Paint += OnPaint;
+        browser.LoadingStateChanged += (_, e) => Send(new { evt = "loading", isLoading = e.IsLoading });
+        browser.LoadError += (_, e) =>
+                             {
+                                 if (e.ErrorCode == CefErrorCode.Aborted)
+                                     return;
+
+                                 Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
+                             };
+        browser.ConsoleMessage += (_, e) =>
+                                  {
+                                      var now = Environment.TickCount64;
+                                      var prev = Interlocked.Read(ref _lastConsoleSendTicks);
+                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
+                                          return;
+
+                                      Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
+                                  };
+
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         lock (_gate)
         {
             _browser = browser;

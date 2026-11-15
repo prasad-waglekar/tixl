@@ -110,9 +110,13 @@ internal sealed class WebHostClient : IDisposable
             _isLoading = true;
             _isFullyLoaded = false;
             _loadError = null;
+<<<<<<< HEAD
             _missingSelectors = null;
             EnqueueCommand(BuildOpenJsonLocked());
             ResendAllDomLocked();
+=======
+            EnqueueCommand(BuildOpenJsonLocked());
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -132,6 +136,7 @@ internal sealed class WebHostClient : IDisposable
         {
             _fps = fps;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
+<<<<<<< HEAD
         }
     }
 
@@ -142,6 +147,8 @@ internal sealed class WebHostClient : IDisposable
         {
             _timeMs = milliseconds;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", ms = milliseconds }));
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -151,6 +158,7 @@ internal sealed class WebHostClient : IDisposable
         {
             _paused = paused;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "pause", value = paused }));
+<<<<<<< HEAD
         }
     }
 
@@ -159,6 +167,8 @@ internal sealed class WebHostClient : IDisposable
         lock (_stateLock)
         {
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", value = time }));
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -173,6 +183,7 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
+<<<<<<< HEAD
     /// <summary>
     /// Tells the client which DOM changes the TiXL graph wants right now (called every frame). Only differences to the
     /// previous call are sent, merged into one message. Changes are kept until the writer has sent them, so a busy
@@ -247,6 +258,8 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
     private void EnqueueCommand(string json)
     {
         if (_disposed)
@@ -299,12 +312,17 @@ internal sealed class WebHostClient : IDisposable
     {
         try
         {
+<<<<<<< HEAD
             await foreach (var item in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 var json = item == DomFlushMarker ? BuildDomMessage() : item;
                 if (json == null)
                     continue;
 
+=======
+            await foreach (var json in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
                 await writer.WriteLineAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync(ct).ConfigureAwait(false);
             }
@@ -333,14 +351,21 @@ internal sealed class WebHostClient : IDisposable
 
             lock (_stateLock)
             {
+<<<<<<< HEAD
+=======
+                // Drain queued commands issued prior to connection and emit the latest open state once.
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
                 while (_outbound.Reader.TryRead(out _))
                 {
                 }
 
                 if (_hasOpen)
                     _outbound.Writer.TryWrite(BuildOpenJsonLocked());
+<<<<<<< HEAD
 
                 ResendAllDomLocked();
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
             }
 
             sendCts = new CancellationTokenSource();
@@ -485,7 +510,11 @@ internal sealed class WebHostClient : IDisposable
     }
 
     private string BuildOpenJsonLocked()
+<<<<<<< HEAD
         => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused, sync = _syncTime, timeMs = _timeMs });
+=======
+        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 
     public void Dispose()
     {
@@ -544,6 +573,7 @@ internal sealed class WebHostClient : IDisposable
         private readonly MemoryMappedViewAccessor _accessor;
     }
 
+<<<<<<< HEAD
     private const string DomFlushMarker = "\u0001dom";
 
     private readonly object _stateLock = new();
@@ -552,6 +582,9 @@ internal sealed class WebHostClient : IDisposable
     private readonly HashSet<(char, string, string)> _domSeen = new();
     private readonly List<(char, string, string)> _domRemoved = new();
     private volatile string? _missingSelectors;
+=======
+    private readonly object _stateLock = new();
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
     private readonly object _frameLock = new();
     private readonly Channel<string> _outbound = Channel.CreateBounded<string>(new BoundedChannelOptions(64)
                                                                                  {

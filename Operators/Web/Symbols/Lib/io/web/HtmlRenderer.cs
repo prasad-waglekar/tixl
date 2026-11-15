@@ -1,6 +1,9 @@
 #nullable enable
 using System.Diagnostics;
+<<<<<<< HEAD
 using T3.Core.Animation;
+=======
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -76,11 +79,17 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
+<<<<<<< HEAD
         if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
         {
             _client.Open(url, width, height, fps, transparent, syncTime);
             _sessionSyncTime = syncTime;
             _lastSentTimeMs = double.NaN;
+=======
+        if (_sessionUrl != url || _sessionTransparent != transparent)
+        {
+            _client.Open(url, width, height, fps, transparent);
+>>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
             _sessionUrl = url;
             _sessionTransparent = transparent;
             _appliedWidth = width;
