@@ -1,0 +1,67 @@
+{
+  "FormatVersion": 3,
+  "Id": "85f3298e-9f3c-4a78-8678-1caa9a3e12c1"/*HtmlRenderer*/,
+  "Description": "Renders an HTML/CSS/JavaScript/SVG page with an off-screen Chromium browser into a texture. Needs the TixlWebHost helper (see WebHost/README.md).",
+  "InputUis": [
+    {
+      "InputId": "3ce7bcaa-3230-41ee-a0dc-601862139ce9"/*Path*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "HTML file, a folder containing index.html, an http(s) URL, or a TiXL asset address. Linked CSS, JS, images and fonts are loaded relative to the file.",
+      "Usage": "FilePath",
+      "FileFilter": "html"
+    },
+    {
+      "InputId": "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9"/*Resolution*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "Size of the browser viewport and of the output texture in pixels. 0,0 uses the requested output resolution."
+    },
+    {
+      "InputId": "c70c8d20-ef5b-4dac-b395-9f1f00dbc633"/*Fps*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "Maximum frame rate of the browser."
+    },
+    {
+      "InputId": "a6319d66-550a-4ac0-88b0-86a22ec411a4"/*Transparent*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 225.0
+      },
+      "Description": "Render without a white page background. The page itself must not paint an opaque background. Changing this restarts the page."
+    },
+    {
+      "InputId": "364f1cab-d6f3-41b2-a78f-55e5c77873a2"/*Paused*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 270.0
+      },
+      "Description": "Pauses rendering and keeps the last frame."
+    },
+    {
+      "InputId": "693a8174-cef1-42fc-95e2-3a8299169663"/*Reload*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 315.0
+      },
+      "Description": "Toggle to reload the page. Also restarts the browser host after a crash or a failed start."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "cd959652-45cc-44d6-b9b6-3112bd5da28c"/*Texture*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

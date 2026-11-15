@@ -1,0 +1,55 @@
+/* Transparent page background: enable "Transparent" on the HtmlRenderer to see the checkerboard through it. */
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #fff;
+}
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  --hue: 220;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px 40px;
+  border-radius: 28px;
+  background: linear-gradient(135deg,
+              hsl(var(--hue) 70% 35%) 0%,
+              hsl(calc(var(--hue) + 60) 70% 25%) 100%);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+h1 { margin: 0; font-size: 44px; letter-spacing: 0.02em; }
+.subtitle { margin: 0 0 8px; opacity: 0.8; }
+
+.spin {
+  transform-origin: 100px 100px;
+  animation: spin 8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+#bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 60px;
+}
+
+#bars .bar {
+  width: 10px;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(to top, #3aa0ff, #ff3a9e);
+  transform-origin: bottom;
+}
+
+#clock { margin: 4px 0 0; font-variant-numeric: tabular-nums; opacity: 0.9; }

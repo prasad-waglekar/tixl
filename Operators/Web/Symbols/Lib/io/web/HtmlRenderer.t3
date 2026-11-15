@@ -1,0 +1,35 @@
+{
+  "FormatVersion": 3,
+  "Id": "85f3298e-9f3c-4a78-8678-1caa9a3e12c1"/*HtmlRenderer*/,
+  "Inputs": [
+    {
+      "Id": "3ce7bcaa-3230-41ee-a0dc-601862139ce9"/*Path*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9"/*Resolution*/,
+      "DefaultValue": {
+        "X": 1280,
+        "Y": 720
+      }
+    },
+    {
+      "Id": "c70c8d20-ef5b-4dac-b395-9f1f00dbc633"/*Fps*/,
+      "DefaultValue": 60
+    },
+    {
+      "Id": "a6319d66-550a-4ac0-88b0-86a22ec411a4"/*Transparent*/,
+      "DefaultValue": false
+    },
+    {
+      "Id": "364f1cab-d6f3-41b2-a78f-55e5c77873a2"/*Paused*/,
+      "DefaultValue": false
+    },
+    {
+      "Id": "693a8174-cef1-42fc-95e2-3a8299169663"/*Reload*/,
+      "DefaultValue": false
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}
