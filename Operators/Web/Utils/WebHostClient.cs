@@ -196,17 +196,15 @@ internal sealed class WebHostClient : IDisposable
                 changed = true;
             }
 
-            if ((changed || _domPending.Count > 0 || _pendingCalls.Count > 0) && !_domFlushQueued)
-            {
-                if (_outbound.Writer.TryWrite(DomFlushMarker))
-                    _domFlushQueued = true;
-            }
+            // Always queue a marker: the queue drops its oldest entries when full, so a marker that was queued earlier
+            // may be gone. Markers are cheap; the writer ignores one when nothing is pending.
+            if (changed || _domPending.Count > 0 || _pendingCalls.Count > 0)
+                _outbound.Writer.TryWrite(DomFlushMarker);
         }
     }
 
     private void ResendAllDomLocked()
     {
-        _domFlushQueued = false;
         if (_domDesired.Count == 0)
             return;
 
@@ -214,15 +212,13 @@ internal sealed class WebHostClient : IDisposable
         foreach (var pair in _domDesired)
             _domPending[pair.Key] = pair.Value;
 
-        if (_outbound.Writer.TryWrite(DomFlushMarker))
-            _domFlushQueued = true;
+        _outbound.Writer.TryWrite(DomFlushMarker);
     }
 
     private string? BuildDomMessage()
     {
         lock (_stateLock)
         {
-            _domFlushQueued = false;
             if (_domPending.Count == 0 && _pendingCalls.Count == 0)
                 return null;
 
@@ -329,7 +325,7 @@ internal sealed class WebHostClient : IDisposable
         }
         catch (OperationCanceledException)
         {
-            if (!_disposed) SetError("The browser host did not connect in time. Check %TEMP%\\TixlWebHost for logs.");
+            if (!_disposed) SetError("The browser host did not connect in time. Check the TixlWebHost folder in your Temp folder for logs.");
         }
         catch (Exception e) when (!_disposed) { SetError($"Connection to the browser host lost: {e.Message}"); }
         finally
@@ -403,7 +399,7 @@ internal sealed class WebHostClient : IDisposable
         if (_disposed) return;
         var code = -1;
         try { code = _process?.ExitCode ?? -1; } catch { }
-        SetError($"The browser host exited unexpectedly (exit code {code}). Check %TEMP%\\TixlWebHost for logs.");
+        SetError($"The browser host exited unexpectedly (exit code {code}). Check the TixlWebHost folder in your Temp folder for logs.");
     }
 
     private void SetError(string message)
@@ -471,7 +467,6 @@ internal sealed class WebHostClient : IDisposable
     private const string DomFlushMarker = "\u0001dom";
 
     private readonly object _stateLock = new();
-    private bool _domFlushQueued;
     private readonly List<DomCall> _pendingCalls = new();
     private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
     private readonly Dictionary<(char, string, string), DomOp> _domPending = new();

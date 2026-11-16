@@ -28,6 +28,10 @@ internal static unsafe class Program
     private static volatile bool _syncTime = true;
     private static double _lastTimeMs;
 
+    private static readonly object _logLock = new();
+    private static string _logPath = "";
+    private static (string Name, int Width, int Height, long SlotSize)? _announceFrames;
+
     private static readonly object _domLock = new();
     private static readonly Dictionary<string, string> _domState = new();
     private static volatile bool _pageReady;
@@ -55,7 +59,27 @@ internal static unsafe class Program
 
         try
         {
-            if (!InitializeCef()) return 3;
+            var logDir = Path.Combine(Path.GetTempPath(), "TixlWebHost");
+            Directory.CreateDirectory(logDir);
+            _logPath = Path.Combine(logDir, $"host-{Environment.ProcessId}.log");
+        }
+        catch
+        {
+            // logging is best effort
+        }
+
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("Unhandled exception: " + e.ExceptionObject);
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+                                                 {
+                                                     Log("Unobserved task exception: " + e.Exception);
+                                                     e.SetObserved();
+                                                 };
+        Log($"TixlWebHost starting (pid {Environment.ProcessId}, parent {parentPid}, CefSharp {typeof(Cef).Assembly.GetName().Version})");
+
+        try
+        {
+            if (!InitializeCef()) { Log("CEF initialization failed."); return 3; }
+            Log("CEF initialized.");
 
             using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             pipe.Connect(15000);
@@ -76,6 +100,7 @@ internal static unsafe class Program
         }
         catch (Exception e)
         {
+            Log("Fatal: " + e);
             try { Shutdown(); } catch { }
             return 1;
         }
@@ -121,20 +146,39 @@ internal static unsafe class Program
             while (reader.ReadLine() is { } line)
             {
                 if (line.Length == 0) continue;
-                try { Handle(line); }
-                catch (Exception) { }
+                try { Dispatch(line); }
+                catch (Exception e) { Log("Bad command: " + e.Message + " :: " + (line.Length > 200 ? line[..200] : line)); }
             }
         }
         catch (IOException) { }
-        finally { _exit.Set(); }
+        finally { Log("Pipe closed."); _exit.Set(); }
     }
 
-    private static void Handle(string line)
+    // Every command runs on the CEF UI thread, in exactly the order it arrived on the pipe. Handling some commands on
+    // this (pipe reader) thread and others on the UI thread reordered them: DOM changes sent right after "open"
+    // were applied before the browser was opened and then thrown away by it.
+    private static void Dispatch(string line)
     {
         using var doc = JsonDocument.Parse(line);
-        var root = doc.RootElement;
+        var root = doc.RootElement.Clone();
+        var cmd = root.GetProperty("cmd").GetString();
 
-        switch (root.GetProperty("cmd").GetString())
+        if (cmd == "close")
+        {
+            _exit.Set();
+            return;
+        }
+
+        Cef.UIThreadTaskFactory.StartNew(() =>
+                                         {
+                                             try { Handle(cmd, root); }
+                                             catch (Exception e) { Log($"Command '{cmd}' failed: {e}"); }
+                                         });
+    }
+
+    private static void Handle(string? cmd, JsonElement root)
+    {
+        switch (cmd)
         {
             case "open":
                 var url = root.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? "about:blank" : "about:blank";
@@ -144,11 +188,12 @@ internal static unsafe class Program
                 var trans = GetBool(root, "transparent", false);
                 var p = GetBool(root, "paused", false);
                 var st = GetBool(root, "syncTime", true);
-                Cef.UIThreadTaskFactory.StartNew(() => Open(url, w, h, fps, trans, p, st));
+                Open(url, w, h, fps, trans, p, st);
                 break;
 
             case "reload":
-                Cef.UIThreadTaskFactory.StartNew(() => { _pageReady = false; _browser?.Reload(true); });
+                _pageReady = false;
+                _browser?.Reload(true);
                 break;
 
             case "dom":
@@ -158,17 +203,19 @@ internal static unsafe class Program
             case "resize":
                 var rw = Dimension(GetInt(root, "width", 1280));
                 var rh = Dimension(GetInt(root, "height", 720));
-                Cef.UIThreadTaskFactory.StartNew(() => { if (_browser != null) _browser.Size = new Size(rw, rh); });
+                if (_browser != null)
+                    _browser.Size = new Size(rw, rh);
                 break;
 
             case "fps":
                 var f = Math.Clamp(GetInt(root, "value", 60), 1, 240);
-                Cef.UIThreadTaskFactory.StartNew(() => { if (_browser?.GetBrowserHost() is { } host) host.WindowlessFrameRate = f; });
+                if (_browser?.GetBrowserHost() is { } host)
+                    host.WindowlessFrameRate = f;
                 break;
 
             case "pause":
                 var pauseVal = GetBool(root, "value", false);
-                Cef.UIThreadTaskFactory.StartNew(() => SetPaused(pauseVal));
+                SetPaused(pauseVal);
                 break;
 
             case "time":
@@ -185,15 +232,12 @@ internal static unsafe class Program
     private static void SetTime(double milliseconds)
     {
         _lastTimeMs = milliseconds;
-        Cef.UIThreadTaskFactory.StartNew(() =>
+        var browser = _browser;
+        if (browser != null && browser.IsBrowserInitialized)
         {
-            var browser = _browser;
-            if (browser != null && browser.IsBrowserInitialized)
-            {
-                ApplyTime(browser);
-                try { browser.GetBrowserHost()?.Invalidate(PaintElementType.View); } catch { }
-            }
-        });
+            ApplyTime(browser);
+            try { browser.GetBrowserHost()?.Invalidate(PaintElementType.View); } catch { }
+        }
     }
 
     private static void ApplyTime(ChromiumWebBrowser browser)
@@ -237,6 +281,7 @@ internal static unsafe class Program
         browser.Paint += OnPaint;
         browser.LoadingStateChanged += (_, e) =>
                                        {
+                                           Log($"loading: {e.IsLoading}");
                                            Send(new { evt = "loading", isLoading = e.IsLoading });
                                            if (e.IsLoading)
                                            {
@@ -249,12 +294,15 @@ internal static unsafe class Program
         browser.LoadError += (_, e) =>
                              {
                                  if (e.ErrorCode == CefErrorCode.Aborted) return;
+                                 Log($"load error {(int)e.ErrorCode} {e.ErrorText}: {e.FailedUrl}");
                                  Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
         
         browser.FrameLoadStart += (_, e) =>
         {
-            _pageReady = false;
+            if (e.Frame.IsMain)
+                _pageReady = false;
+
             if (e.Frame.IsMain && _syncTime)
             {
                 e.Browser.ExecuteScriptAsync(@"
@@ -287,6 +335,7 @@ internal static unsafe class Program
                                   };
 
         lock (_gate) { _browser = browser; }
+        Log($"open: {url} ({width}x{height} @ {fps} fps, transparent={transparent}, syncTime={syncTime})");
         browser.LoadUrl(url);
     }
 
@@ -354,7 +403,10 @@ internal static unsafe class Program
                             }
 
                             if (changed && ReferenceEquals(browser, _browser))
+                            {
+                                Log("selectors without a match: " + missing);
                                 Send(new { evt = "domMissing", missing });
+                            }
                         }
                         catch (Exception e) { Send(new { evt = "error", message = "DOM update failed: " + e.Message }); }
                     }, TaskScheduler.Default);
@@ -385,6 +437,7 @@ internal static unsafe class Program
         var height = e.Height;
         if (width <= 0 || height <= 0) return;
 
+        (string Name, int Width, int Height, long SlotSize)? announce;
         lock (_gate)
         {
             if (!ReferenceEquals(sender, _browser)) return;
@@ -396,7 +449,13 @@ internal static unsafe class Program
 
             _frameCounter = counter;
             Volatile.Write(ref *(long*)_basePtr, counter);
+
+            announce = _announceFrames;
+            _announceFrames = null;
         }
+
+        if (announce is { } a)
+            Send(new { evt = "frames", name = a.Name, width = a.Width, height = a.Height, slotSize = a.SlotSize });
     }
 
     private static void AllocateSharedMemory(int width, int height)
@@ -422,7 +481,7 @@ internal static unsafe class Program
         *(int*)(_basePtr + 12) = height;
         *(int*)(_basePtr + 16) = width * 4;
 
-        Send(new { evt = "frames", name, width, height, slotSize = _slotSize });
+        _announceFrames = (name, width, height, _slotSize); // sent by OnPaint after the lock is released
     }
 
     private static void ReleaseSharedMemory()
@@ -467,6 +526,22 @@ internal static unsafe class Program
         {
             try { _writer?.WriteLine(json); }
             catch (IOException) { _exit.Set(); }
+        }
+    }
+
+    private static void Log(string message)
+    {
+        if (_logPath.Length == 0)
+            return;
+
+        try
+        {
+            lock (_logLock)
+                File.AppendAllText(_logPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // logging is best effort
         }
     }
 

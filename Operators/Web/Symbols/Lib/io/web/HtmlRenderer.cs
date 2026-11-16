@@ -1,5 +1,6 @@
 ﻿#nullable enable
 using System.Diagnostics;
+using T3.Core.Animation;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -81,6 +82,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _appliedFps = fps;
             _appliedPaused = false;
             _lastSettingsSendMs = nowMs;
+            _lastSentSeconds = double.NaN; // the new page needs the current time again
         }
         else
         {
@@ -112,7 +114,16 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         }
 
         if (syncTime)
-            _client.SetTime(context.LocalTime);
+        {
+            // LocalFxTime (in bars) advances while TiXL plays or Idle Motion is on, stands still otherwise, and follows
+            // scrubbing. Only changes are sent, so a paused TiXL costs nothing and the page stays frozen.
+            var seconds = Playback.Current.SecondsFromBars(context.LocalFxTime);
+            if (double.IsNaN(_lastSentSeconds) || Math.Abs(seconds - _lastSentSeconds) > 0.0005)
+            {
+                _client.SetTime(seconds);
+                _lastSentSeconds = seconds;
+            }
+        }
 
         IsReady.Value = _client.IsFullyLoaded;
 
@@ -273,6 +284,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private int _appliedFps;
     private bool _appliedPaused;
     private double _lastSettingsSendMs;
+    private double _lastSentSeconds = double.NaN;
 
     [Input(Guid = "3ce7bcaa-3230-41ee-a0dc-601862139ce9")] public readonly InputSlot<string> Path = new();
     [Input(Guid = "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9")] public readonly InputSlot<Int2> Resolution = new();
