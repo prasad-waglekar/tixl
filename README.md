@@ -1,3 +1,23 @@
+## Custom Fork Features (`feature/exr-export`)
+
+This branch extends **TiXL** with linear High-Dynamic-Range (HDR) **OpenEXR (`.exr`)** image sequence rendering for professional post-production and VFX compositing workflows.
+
+### 🎞️ OpenEXR Export (`feature/exr-export`)
+
+Render high-precision linear color and alpha data directly from TiXL's render pipeline into industry-standard `.exr` image sequences.
+
+* **High-Dynamic-Range (HDR) & Linear Color Preservation:** Exports unclipped floating-point pixel values (`16-bit half-float` / `32-bit float`) without tone-mapping loss—ideal for ACEScg and linear compositing pipelines.
+* **Lossless Alpha & Compositing Ready:** Preserves clean alpha channels for seamless layering over live-action plates or 3D renders.
+* **Post-Production Compatibility:** Designed for direct import into **DaVinci Resolve (Fusion)**, **Blender**, **Nuke**, and **After Effects**.
+
+### Active Feature Branches
+
+| Branch | Description |
+| :--- | :--- |
+| [`feature/exr-export`](https://github.com/prasad-waglekar/tixl/tree/feature/exr-export) | *(Current Branch)* Linear HDR OpenEXR image sequence rendering |
+| [`feature/htmlrenderer`](https://github.com/prasad-waglekar/tixl/tree/feature/htmlrenderer) | `HtmlRenderer` operator, out-of-process CEF host, and deterministic timeline clock sync |
+
+---
 # TiXL (Tooll3) - A realtime animation toolkit
 
 [![Discord](https://img.shields.io/discord/823853172619083816.svg?style=for-the-badge)](https://discord.gg/YmSyQdeH3S)
