@@ -22,8 +22,6 @@ Render high-precision linear color and alpha data directly from TiXL's render pi
 
 [![Discord](https://img.shields.io/discord/823853172619083816.svg?style=for-the-badge)](https://discord.gg/YmSyQdeH3S)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](https://github.com/tixl3d/tixl/blob/main/LICENSE.txt)
-[![Download](https://img.shields.io/badge/Download_TiXL_v4.1.1.1-FF3A9E?style=for-the-badge)](https://github.com/tixl3d/tixl/releases/download/v4.1.1/Tixl-v4.1.1.1.exe)
-
 [![tooll-screenshot](https://user-images.githubusercontent.com/1732545/173256422-a4ef9894-d954-4bc3-8c24-000bfbe1c3ad.png)](https://www.youtube.com/watch?v=PrxhwOC9hLw "Tooll3 - A quick overview")
 
 ## Overview
