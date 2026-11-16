@@ -1,8 +1,28 @@
+## Custom Fork Features
+
+This fork extends **TiXL** with custom rendering and export capabilities designed for deterministic motion graphics and hybrid web-based workflows:
+
+### 🌐 Out-of-Process HTML/CEF Renderer (`feature/htmlrenderer`)
+Render live HTML, CSS, JavaScript, and WebGL content directly as textures inside the TiXL node graph via an isolated **Chromium Embedded Framework (CEF)** host.
+* **Out-of-Process Architecture:** Runs the browser engine in a separate host process to keep CEF decoupled from TiXL's main real-time render loop.
+* **Deterministic Timeline Sync (`SyncToTiXLTime`):** Injects a clock shim that locks `requestAnimationFrame`, CSS animations, and page timers to TiXL's timeline—ensuring frame-accurate playback when scrubbing or rendering offline.
+* **Transparent Overlay Support:** Supports full alpha-channel compositing for layering web UI, kinetic typography, and HUD elements over 3D and shader scenes.
+
+### 🎞️ OpenEXR Export (`feature/exr-export`)
+* **High-Dynamic-Range Output:** Adds `.exr` image sequence export support for preserving linear color data and full bit-depth in downstream compositing pipelines (e.g., DaVinci Resolve Fusion, Blender, Nuke).
+
+---
+
+### Active Feature Branches
+| Branch | Description |
+| :--- | :--- |
+| [`feature/htmlrenderer`](https://github.com/prasad-waglekar/tixl/tree/feature/htmlrenderer) | `HtmlRenderer` operator, out-of-process CEF host, and deterministic timeline clock sync |
+| [`feature/exr-export`](https://github.com/prasad-waglekar/tixl/tree/feature/exr-export) | Linear HDR OpenEXR image sequence rendering |
+
 # TiXL (Tooll3) - A realtime animation toolkit
 
 [![Discord](https://img.shields.io/discord/823853172619083816.svg?style=for-the-badge)](https://discord.gg/YmSyQdeH3S)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](https://github.com/tixl3d/tixl/blob/main/LICENSE.txt)
-[![Download](https://img.shields.io/badge/Download_TiXL_v4.1.1.1-FF3A9E?style=for-the-badge)](https://github.com/tixl3d/tixl/releases/download/v4.1.1/Tixl-v4.1.1.1.exe)
 
 [![tooll-screenshot](https://user-images.githubusercontent.com/1732545/173256422-a4ef9894-d954-4bc3-8c24-000bfbe1c3ad.png)](https://www.youtube.com/watch?v=PrxhwOC9hLw "Tooll3 - A quick overview")
 
