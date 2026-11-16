@@ -46,6 +46,7 @@ internal static unsafe class Program
     private static long _frameCounter;
     private static int _generation;
 
+    [STAThread]
     private static int Main(string[] args)
     {
         var parentPid = 0;
@@ -81,7 +82,7 @@ internal static unsafe class Program
             if (!InitializeCef()) { Log("CEF initialization failed."); return 3; }
             Log("CEF initialized.");
 
-            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.None);
             pipe.Connect(15000);
 
             var utf8 = new UTF8Encoding(false);
@@ -108,19 +109,27 @@ internal static unsafe class Program
 
     private static bool InitializeCef()
     {
+        var baseDir = AppContext.BaseDirectory;
         var logDir = Path.Combine(Path.GetTempPath(), "TixlWebHost");
-        Directory.CreateDirectory(logDir);
+        var cacheDir = Path.Combine(logDir, $"cache-{Environment.ProcessId}");
+        Directory.CreateDirectory(cacheDir);
 
         var settings = new CefSettings
                            {
                                LogSeverity = LogSeverity.Warning,
                                LogFile = Path.Combine(logDir, $"cef-{Environment.ProcessId}.log"),
+                               BrowserSubprocessPath = Path.Combine(baseDir, "CefSharp.BrowserSubprocess.exe"),
+                               ResourcesDirPath = baseDir,
+                               LocalesDirPath = Path.Combine(baseDir, "locales"),
+                               RootCachePath = cacheDir,
+                               CachePath = cacheDir,
                            };
 
         settings.CefCommandLineArgs.Add("allow-file-access-from-files");
         settings.CefCommandLineArgs.Add("autoplay-policy", "no-user-gesture-required");
+        settings.CefCommandLineArgs.Add("disable-gpu-shader-disk-cache");
 
-        return Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null);
+        return Cef.Initialize(settings, performDependencyCheck: false, browserProcessHandler: null);
     }
 
     private static void StartParentWatch(int parentPid)
@@ -154,9 +163,6 @@ internal static unsafe class Program
         finally { Log("Pipe closed."); _exit.Set(); }
     }
 
-    // Every command runs on the CEF UI thread, in exactly the order it arrived on the pipe. Handling some commands on
-    // this (pipe reader) thread and others on the UI thread reordered them: DOM changes sent right after "open"
-    // were applied before the browser was opened and then thrown away by it.
     private static void Dispatch(string line)
     {
         using var doc = JsonDocument.Parse(line);
@@ -357,7 +363,7 @@ internal static unsafe class Program
         if (_pageReady && _browser != null)
         {
             var opsJson = root.TryGetProperty("ops", out var o) ? o.GetRawText() : "[]";
-            var callsJson = root.TryGetProperty("calls", out var c2) ? c2.GetRawText() : "[]";
+            var callsJson = root.TryGetProperty("calls", out var c) ? c.GetRawText() : "[]";
             ApplyDomAsync(_browser, opsJson, callsJson);
         }
     }
@@ -377,12 +383,10 @@ internal static unsafe class Program
 
     private static void ApplyDomAsync(ChromiumWebBrowser browser, string opsJson, string callsJson)
     {
-        // Force the DOM update to happen safely on the UI thread
         Cef.UIThreadTaskFactory.StartNew(() =>
         {
             try
             {
-                // Double-check that the browser hasn't been disposed/replaced while we waited for the UI thread
                 if (!ReferenceEquals(browser, _browser) || !_pageReady) return;
                 
                 var frame = browser.GetMainFrame();
@@ -393,6 +397,7 @@ internal static unsafe class Program
                     {
                         try
                         {
+                            browser.GetBrowserHost()?.Invalidate(PaintElementType.View);
                             if (!t.IsCompletedSuccessfully || !t.Result.Success || t.Result.Result is not string missing) return;
 
                             bool changed;
@@ -481,7 +486,7 @@ internal static unsafe class Program
         *(int*)(_basePtr + 12) = height;
         *(int*)(_basePtr + 16) = width * 4;
 
-        _announceFrames = (name, width, height, _slotSize); // sent by OnPaint after the lock is released
+        _announceFrames = (name, width, height, _slotSize);
     }
 
     private static void ReleaseSharedMemory()
@@ -508,15 +513,18 @@ internal static unsafe class Program
 
     private static void Shutdown()
     {
-        Cef.UIThreadTaskFactory.StartNew(() =>
+        try
         {
-            ChromiumWebBrowser? browser;
-            lock (_gate) browser = DetachBrowserLocked();
-            try { browser?.Dispose(); } catch { }
-        }).Wait();
+            Cef.UIThreadTaskFactory.StartNew(() =>
+            {
+                ChromiumWebBrowser? browser;
+                lock (_gate) browser = DetachBrowserLocked();
+                try { browser?.Dispose(); } catch { }
+            }).Wait(1000);
+        }
+        catch { }
 
         lock (_gate) ReleaseSharedMemory();
-        try { Cef.Shutdown(); } catch { }
     }
 
     private static void Send(object message)
