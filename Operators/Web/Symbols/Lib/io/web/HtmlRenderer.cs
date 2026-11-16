@@ -1,6 +1,5 @@
 #nullable enable
 using System.Diagnostics;
-using T3.Core.Animation;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -32,7 +31,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         var fps = Math.Clamp(Fps.GetValue(context), 1, 240);
         var transparent = Transparent.GetValue(context);
         var paused = Paused.GetValue(context);
-        var syncTime = SyncToTiXLTime.GetValue(context);
 
         var reloadTriggered = MathUtils.WasTriggered(Reload.GetValue(context), ref _reloadState);
         if (reloadTriggered)
@@ -76,11 +74,9 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
-        if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
+        if (_sessionUrl != url || _sessionTransparent != transparent)
         {
-            _client.Open(url, width, height, fps, transparent, syncTime);
-            _sessionSyncTime = syncTime;
-            _lastSentTimeMs = double.NaN;
+            _client.Open(url, width, height, fps, transparent);
             _sessionUrl = url;
             _sessionTransparent = transparent;
             _appliedWidth = width;
@@ -113,17 +109,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
                 _client.Reload();
         }
 
-        if (syncTime)
-        {
-            // LocalFxTime advances while TiXL plays or Idle Motion is on, stands still otherwise, and follows scrubbing.
-            var timeMs = Playback.Current.SecondsFromBars(context.LocalFxTime) * 1000.0;
-            if (double.IsNaN(_lastSentTimeMs) || Math.Abs(timeMs - _lastSentTimeMs) > 0.0005)
-            {
-                _client.SetTime(timeMs);
-                _lastSentTimeMs = timeMs;
-            }
-        }
-
         if (paused != _appliedPaused)
         {
             _client.SetPaused(paused);
@@ -131,13 +116,11 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         }
 
         _client.SetTime(context.LocalTime);
+        IsReady.Value = _client.IsFullyLoaded;
+
+        // Collect and send connected DOM/CSS modifier operators (CssColor, CssNumber, etc.)
         CollectModifiers(context);
         _client.SetDomOps(_domScope.Ops);
-        IsReady.Value = _client.IsFullyLoaded;
-=======
-        _client.SetTime(context.LocalTime);
-        IsReady.Value = _client.IsFullyLoaded;
->>>>>>> cc458678e (WIP: local edits before time sync patch)
 
         if (_client.TryGetFrame(out var frame))
         {
@@ -171,10 +154,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         Texture.Value = _texture;
     }
 
-    /// <summary>
-    /// Evaluates the connected modifier operators. They add their DOM changes to the scope that is placed in the
-    /// context for the duration of this call; the client then sends only what changed.
-    /// </summary>
     private void CollectModifiers(EvaluationContext context)
     {
         _domScope.Ops.Clear();
@@ -311,8 +290,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     private string? _sessionUrl;
     private bool _sessionTransparent;
-    private bool _sessionSyncTime;
-    private double _lastSentTimeMs = double.NaN;
     private readonly WebDomOps _domScope = new();
     private int _appliedWidth;
     private int _appliedHeight;
@@ -338,8 +315,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     [Input(Guid = "693a8174-cef1-42fc-95e2-3a8299169663")]
     public readonly InputSlot<bool> Reload = new();
 
-    [Input(Guid = "17a2748d-b519-4b08-aac2-fafe6b02e89d")]
-    public readonly InputSlot<bool> SyncToTiXLTime = new();
     [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")]
     public readonly MultiInputSlot<Command> Modifiers = new();
 }

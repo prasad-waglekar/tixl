@@ -95,7 +95,7 @@ internal sealed class WebHostClient : IDisposable
 
     // ---- non-blocking outbound commands ----
 
-    public void Open(string url, int width, int height, int fps, bool transparent, bool syncTime)
+    public void Open(string url, int width, int height, int fps, bool transparent)
     {
         lock (_stateLock)
         {
@@ -104,13 +104,14 @@ internal sealed class WebHostClient : IDisposable
             _height = height;
             _fps = fps;
             _transparent = transparent;
-            _syncTime = syncTime;
             _paused = false;
             _hasOpen = true;
             _isLoading = true;
             _isFullyLoaded = false;
             _loadError = null;
+            _missingSelectors = null;
             EnqueueCommand(BuildOpenJsonLocked());
+            ResendAllDomLocked();
         }
     }
 
@@ -130,16 +131,6 @@ internal sealed class WebHostClient : IDisposable
         {
             _fps = fps;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
-        }
-    }
-
-    /// <summary>Sends TiXL's animation time (milliseconds) to the page clock. Only used when time sync is on.</summary>
-    public void SetTime(double milliseconds)
-    {
-        lock (_stateLock)
-        {
-            _timeMs = milliseconds;
-            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", ms = milliseconds }));
         }
     }
 
@@ -168,6 +159,75 @@ internal sealed class WebHostClient : IDisposable
             _isFullyLoaded = false;
             _loadError = null;
             EnqueueCommand("{\"cmd\":\"reload\"}");
+        }
+    }
+
+    public void SetDomOps(List<DomOp> ops)
+    {
+        var changed = false;
+        lock (_stateLock)
+        {
+            _domSeen.Clear();
+            foreach (var op in ops)
+            {
+                var key = op.Key;
+                _domSeen.Add(key);
+                if (_domDesired.TryGetValue(key, out var old) && old.Value == op.Value)
+                    continue;
+
+                _domDesired[key] = op;
+                _domPending[key] = op;
+                changed = true;
+            }
+
+            if (_domDesired.Count > _domSeen.Count)
+            {
+                _domRemoved.Clear();
+                foreach (var key in _domDesired.Keys)
+                {
+                    if (!_domSeen.Contains(key))
+                        _domRemoved.Add(key);
+                }
+
+                foreach (var key in _domRemoved)
+                {
+                    var op = _domDesired[key];
+                    _domDesired.Remove(key);
+                    _domPending[key] = op with { Value = null };
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                EnqueueCommand(DomFlushMarker);
+        }
+    }
+
+    private void ResendAllDomLocked()
+    {
+        if (_domDesired.Count == 0)
+            return;
+
+        _domPending.Clear();
+        foreach (var pair in _domDesired)
+            _domPending[pair.Key] = pair.Value;
+
+        EnqueueCommand(DomFlushMarker);
+    }
+
+    private string? BuildDomMessage()
+    {
+        lock (_stateLock)
+        {
+            if (_domPending.Count == 0)
+                return null;
+
+            var list = new List<object?[]>(_domPending.Count);
+            foreach (var op in _domPending.Values)
+                list.Add(new object?[] { op.Kind.ToString(), op.Selector, op.Name, op.Value });
+
+            _domPending.Clear();
+            return JsonSerializer.Serialize(new { cmd = "dom", ops = list });
         }
     }
 
@@ -223,8 +283,12 @@ internal sealed class WebHostClient : IDisposable
     {
         try
         {
-            await foreach (var json in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var item in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
+                var json = item == DomFlushMarker ? BuildDomMessage() : item;
+                if (json == null)
+                    continue;
+
                 await writer.WriteLineAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync(ct).ConfigureAwait(false);
             }
@@ -253,15 +317,10 @@ internal sealed class WebHostClient : IDisposable
 
             lock (_stateLock)
             {
-                // Drain queued commands issued prior to connection and emit the latest open state once.
-=======
->>>>>>> cc458678e (WIP: local edits before time sync patch)
                 while (_outbound.Reader.TryRead(out _))
                 {
                 }
 
-                if (_hasOpen)
-                    _outbound.Writer.TryWrite(BuildOpenJsonLocked());
                 if (_hasOpen)
                     _outbound.Writer.TryWrite(BuildOpenJsonLocked());
 
@@ -410,7 +469,7 @@ internal sealed class WebHostClient : IDisposable
     }
 
     private string BuildOpenJsonLocked()
-        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused, sync = _syncTime, timeMs = _timeMs });
+        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
 
     public void Dispose()
     {
@@ -469,6 +528,8 @@ internal sealed class WebHostClient : IDisposable
         private readonly MemoryMappedViewAccessor _accessor;
     }
 
+    private const string DomFlushMarker = "\u0001dom";
+
     private readonly object _stateLock = new();
     private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
     private readonly Dictionary<(char, string, string), DomOp> _domPending = new();
@@ -495,8 +556,6 @@ internal sealed class WebHostClient : IDisposable
     private int _height = 720;
     private int _fps = 60;
     private bool _transparent;
-    private bool _syncTime;
-    private double _timeMs;
     private bool _paused;
     private bool _hasOpen;
 

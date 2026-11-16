@@ -9,8 +9,8 @@
     {
       "Id": "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9"/*Resolution*/,
       "DefaultValue": {
-        "X": 1280,
-        "Y": 720
+        "Width": 0,
+        "Height": 0
       }
     },
     {
@@ -28,10 +28,6 @@
     {
       "Id": "693a8174-cef1-42fc-95e2-3a8299169663"/*Reload*/,
       "DefaultValue": false
-    },
-    {
-      "Id": "17a2748d-b519-4b08-aac2-fafe6b02e89d"/*SyncToTiXLTime*/,
-      "DefaultValue": true
     },
     {
       "Id": "e577b060-f80d-4f22-ae82-b9a1691ce481"/*Modifiers*/,
