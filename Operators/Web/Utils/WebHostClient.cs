@@ -297,13 +297,15 @@ internal sealed class WebHostClient : IDisposable
     {
         CancellationTokenSource? sendCts = null;
         Task? sendTask = null;
+        StreamWriter? writer = null; // disposed only after the send loop has stopped (see finally)
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             await _pipe!.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
 
             var utf8 = new UTF8Encoding(false);
-            using var writer = new StreamWriter(_pipe, utf8, 1024, leaveOpen: true);
+            var activeWriter = new StreamWriter(_pipe, utf8, 1024, leaveOpen: true);
+            writer = activeWriter;
 
             lock (_stateLock)
             {
@@ -313,7 +315,7 @@ internal sealed class WebHostClient : IDisposable
             }
 
             sendCts = new CancellationTokenSource();
-            sendTask = Task.Run(() => SendLoop(writer, sendCts.Token));
+            sendTask = Task.Run(() => SendLoop(activeWriter, sendCts.Token));
             _isConnected = true;
 
             using var reader = new StreamReader(_pipe, utf8, false, 4096, leaveOpen: true);
@@ -337,6 +339,10 @@ internal sealed class WebHostClient : IDisposable
                 if (sendTask != null) { try { await sendTask.ConfigureAwait(false); } catch { } }
                 sendCts.Dispose();
             }
+
+            // Disposing the writer while the send loop is still inside an async write throws
+            // "The stream is currently in use by a previous operation", so it is closed last.
+            try { writer?.Dispose(); } catch { }
         }
     }
 
