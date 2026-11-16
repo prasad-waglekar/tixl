@@ -47,22 +47,15 @@ internal static unsafe class Program
         var parentPid = 0;
         for (var i = 0; i < args.Length - 1; i++)
         {
-            if (args[i] == "--pipe")
-                _pipeName = args[i + 1];
-            else if (args[i] == "--parent")
-                int.TryParse(args[i + 1], out parentPid);
+            if (args[i] == "--pipe") _pipeName = args[i + 1];
+            else if (args[i] == "--parent") int.TryParse(args[i + 1], out parentPid);
         }
 
-        if (_pipeName.Length == 0)
-        {
-            Console.Error.WriteLine("Usage: TixlWebHost --pipe <name> [--parent <pid>]");
-            return 2;
-        }
+        if (_pipeName.Length == 0) return 2;
 
         try
         {
-            if (!InitializeCef())
-                return 3;
+            if (!InitializeCef()) return 3;
 
             using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             pipe.Connect(15000);
@@ -83,7 +76,6 @@ internal static unsafe class Program
         }
         catch (Exception e)
         {
-            Console.Error.WriteLine(e);
             try { Shutdown(); } catch { }
             return 1;
         }
@@ -103,18 +95,12 @@ internal static unsafe class Program
         settings.CefCommandLineArgs.Add("allow-file-access-from-files");
         settings.CefCommandLineArgs.Add("autoplay-policy", "no-user-gesture-required");
 
-        if (Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null))
-            return true;
-
-        Console.Error.WriteLine("CEF initialization failed.");
-        return false;
+        return Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null);
     }
 
     private static void StartParentWatch(int parentPid)
     {
-        if (parentPid == 0)
-            return;
-
+        if (parentPid == 0) return;
         var thread = new Thread(() =>
                                 {
                                     try
@@ -123,7 +109,6 @@ internal static unsafe class Program
                                         parent.WaitForExit();
                                     }
                                     catch { }
-
                                     _exit.Set();
                                 }) { IsBackground = true, Name = "parent-watch" };
         thread.Start();
@@ -135,11 +120,9 @@ internal static unsafe class Program
         {
             while (reader.ReadLine() is { } line)
             {
-                if (line.Length == 0)
-                    continue;
-
+                if (line.Length == 0) continue;
                 try { Handle(line); }
-                catch (Exception e) { Send(new { evt = "error", message = e.Message }); }
+                catch (Exception) { }
             }
         }
         catch (IOException) { }
@@ -155,19 +138,17 @@ internal static unsafe class Program
         {
             case "open":
                 var url = root.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? "about:blank" : "about:blank";
-                Open(url,
-                     Dimension(GetInt(root, "width", 1280)),
-                     Dimension(GetInt(root, "height", 720)),
-                     Math.Clamp(GetInt(root, "fps", 60), 1, 240),
-                     GetBool(root, "transparent", false),
-                     GetBool(root, "paused", false),
-                     GetBool(root, "syncTime", true));
+                var w = Dimension(GetInt(root, "width", 1280));
+                var h = Dimension(GetInt(root, "height", 720));
+                var fps = Math.Clamp(GetInt(root, "fps", 60), 1, 240);
+                var trans = GetBool(root, "transparent", false);
+                var p = GetBool(root, "paused", false);
+                var st = GetBool(root, "syncTime", true);
+                Cef.UIThreadTaskFactory.StartNew(() => Open(url, w, h, fps, trans, p, st));
                 break;
 
             case "reload":
-                _pageReady = false;
-                lock (_gate)
-                    _browser?.Reload(true);
+                Cef.UIThreadTaskFactory.StartNew(() => { _pageReady = false; _browser?.Reload(true); });
                 break;
 
             case "dom":
@@ -175,32 +156,24 @@ internal static unsafe class Program
                 break;
 
             case "resize":
-                lock (_gate)
-                {
-                    if (_browser != null)
-                        _browser.Size = new Size(Dimension(GetInt(root, "width", 1280)), Dimension(GetInt(root, "height", 720)));
-                }
+                var rw = Dimension(GetInt(root, "width", 1280));
+                var rh = Dimension(GetInt(root, "height", 720));
+                Cef.UIThreadTaskFactory.StartNew(() => { if (_browser != null) _browser.Size = new Size(rw, rh); });
                 break;
 
             case "fps":
-                lock (_gate)
-                {
-                    var host = _browser?.GetBrowserHost();
-                    if (host != null)
-                        host.WindowlessFrameRate = Math.Clamp(GetInt(root, "value", 60), 1, 240);
-                }
+                var f = Math.Clamp(GetInt(root, "value", 60), 1, 240);
+                Cef.UIThreadTaskFactory.StartNew(() => { if (_browser?.GetBrowserHost() is { } host) host.WindowlessFrameRate = f; });
                 break;
 
             case "pause":
-                SetPaused(GetBool(root, "value", false));
+                var pauseVal = GetBool(root, "value", false);
+                Cef.UIThreadTaskFactory.StartNew(() => SetPaused(pauseVal));
                 break;
 
             case "time":
-                lock (_gate)
-                {
-                    var time = root.TryGetProperty("value", out var p) ? p.GetDouble() : 0.0;
-                    SetTime(time * 1000.0);
-                }
+                var time = root.TryGetProperty("value", out var timeProp) ? timeProp.GetDouble() : 0.0;
+                SetTime(time * 1000.0);
                 break;
 
             case "close":
@@ -212,22 +185,26 @@ internal static unsafe class Program
     private static void SetTime(double milliseconds)
     {
         _lastTimeMs = milliseconds;
-        var browser = _browser;
-        if (browser != null && browser.IsBrowserInitialized)
+        Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            ApplyTime(browser);
-            var host = browser.GetBrowserHost();
-            host?.Invalidate(PaintElementType.View);
-        }
+            var browser = _browser;
+            if (browser != null && browser.IsBrowserInitialized)
+            {
+                ApplyTime(browser);
+                try { browser.GetBrowserHost()?.Invalidate(PaintElementType.View); } catch { }
+            }
+        });
     }
 
     private static void ApplyTime(ChromiumWebBrowser browser)
     {
-        if (!_syncTime)
-            return;
-
-        var t = _lastTimeMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        browser.ExecuteScriptAsync($"if (typeof window.__advanceTiXLClock === 'function') window.__advanceTiXLClock({t});");
+        if (!_syncTime) return;
+        try
+        {
+            var t = _lastTimeMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            browser.ExecuteScriptAsync($"if (typeof window.__advanceTiXLClock === 'function') window.__advanceTiXLClock({t});");
+        }
+        catch { }
     }
 
     private static void Open(string url, int width, int height, int fps, bool transparent, bool paused, bool syncTime)
@@ -252,9 +229,7 @@ internal static unsafe class Program
         var browserSettings = new BrowserSettings
                                   {
                                       WindowlessFrameRate = fps,
-                                      BackgroundColor = transparent
-                                                            ? Cef.ColorSetARGB(0, 0, 0, 0)
-                                                            : Cef.ColorSetARGB(255, 255, 255, 255),
+                                      BackgroundColor = transparent ? Cef.ColorSetARGB(0, 0, 0, 0) : Cef.ColorSetARGB(255, 255, 255, 255),
                                   };
 
         var browser = new ChromiumWebBrowser(string.Empty, browserSettings);
@@ -273,14 +248,13 @@ internal static unsafe class Program
                                        };
         browser.LoadError += (_, e) =>
                              {
-                                 if (e.ErrorCode == CefErrorCode.Aborted)
-                                     return;
-
+                                 if (e.ErrorCode == CefErrorCode.Aborted) return;
                                  Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
         
         browser.FrameLoadStart += (_, e) =>
         {
+            _pageReady = false;
             if (e.Frame.IsMain && _syncTime)
             {
                 e.Browser.ExecuteScriptAsync(@"
@@ -294,9 +268,7 @@ internal static unsafe class Program
                     Date.now = function() { return window.__tixlTimeMs; };
                     window.__advanceTiXLClock = function(tMs) {
                         window.__tixlTimeMs = tMs;
-                        if (typeof window.setTiXLTime === 'function') {
-                            window.setTiXLTime(tMs / 1000.0);
-                        }
+                        if (typeof window.setTiXLTime === 'function') window.setTiXLTime(tMs / 1000.0);
                         const cbs = window.__tixlRafCallbacks.splice(0);
                         for (const cb of cbs) {
                             try { cb(window.__tixlTimeMs); } catch(err) { console.error(err); }
@@ -310,17 +282,11 @@ internal static unsafe class Program
                                   {
                                       var now = Environment.TickCount64;
                                       var prev = Interlocked.Read(ref _lastConsoleSendTicks);
-                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
-                                          return;
-
+                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev) return;
                                       Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
                                   };
 
-        lock (_gate)
-        {
-            _browser = browser;
-        }
-
+        lock (_gate) { _browser = browser; }
         browser.LoadUrl(url);
     }
 
@@ -339,70 +305,65 @@ internal static unsafe class Program
             }
         }
 
-        var browser = _browser;
-        if (browser != null && _pageReady)
+        if (_pageReady && _browser != null)
         {
             var opsJson = root.TryGetProperty("ops", out var o) ? o.GetRawText() : "[]";
             var callsJson = root.TryGetProperty("calls", out var c2) ? c2.GetRawText() : "[]";
-            _ = ApplyDomAsync(browser, opsJson, callsJson);
+            ApplyDomAsync(_browser, opsJson, callsJson);
         }
     }
 
     private static void PageLoaded(ChromiumWebBrowser browser)
     {
         var frame = browser.GetMainFrame();
-        if (frame is not { IsValid: true })
-            return;
+        if (frame is not { IsValid: true }) return;
 
         frame.ExecuteJavaScriptAsync(DomHelper.Source);
         _pageReady = true;
 
         string all;
-        lock (_domLock)
-            all = _domState.Count == 0 ? "" : "[" + string.Join(",", _domState.Values) + "]";
-
-        if (all.Length > 0)
-            _ = ApplyDomAsync(browser, all, "[]");
+        lock (_domLock) all = _domState.Count == 0 ? "" : "[" + string.Join(",", _domState.Values) + "]";
+        if (all.Length > 0) ApplyDomAsync(browser, all, "[]");
     }
 
-    private static Task ApplyDomAsync(ChromiumWebBrowser browser, string opsJson, string callsJson)
+    private static void ApplyDomAsync(ChromiumWebBrowser browser, string opsJson, string callsJson)
     {
-        try
+        // Force the DOM update to happen safely on the UI thread
+        Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            var frame = browser.GetMainFrame();
-            if (frame is not { IsValid: true })
-                return Task.CompletedTask;
-
-            var evalTask = frame.EvaluateScriptAsync(
-                "window.__tixlDom?window.__tixlDom.apply(" + opsJson + "," + callsJson + "):'[]'");
-            return evalTask.ContinueWith(t =>
+            try
             {
-                try
-                {
-                    if (!t.IsCompletedSuccessfully || !t.Result.Success || t.Result.Result is not string missing)
-                        return;
+                // Double-check that the browser hasn't been disposed/replaced while we waited for the UI thread
+                if (!ReferenceEquals(browser, _browser) || !_pageReady) return;
+                
+                var frame = browser.GetMainFrame();
+                if (frame is not { IsValid: true }) return;
 
-                    bool changed;
-                    lock (_domLock)
+                frame.EvaluateScriptAsync("window.__tixlDom?window.__tixlDom.apply(" + opsJson + "," + callsJson + "):'[]'")
+                    .ContinueWith(t =>
                     {
-                        changed = missing != _lastMissing;
-                        _lastMissing = missing;
-                    }
+                        try
+                        {
+                            if (!t.IsCompletedSuccessfully || !t.Result.Success || t.Result.Result is not string missing) return;
 
-                    if (changed && ReferenceEquals(browser, _browser))
-                        Send(new { evt = "domMissing", missing });
-                }
-                catch (Exception e)
-                {
-                    Send(new { evt = "error", message = "DOM update failed: " + e.Message });
-                }
-            }, TaskScheduler.Default);
-        }
-        catch (Exception e)
-        {
-            Send(new { evt = "error", message = "DOM update failed: " + e.Message });
-            return Task.CompletedTask;
-        }
+                            bool changed;
+                            lock (_domLock)
+                            {
+                                changed = missing != _lastMissing;
+                                _lastMissing = missing;
+                            }
+
+                            if (changed && ReferenceEquals(browser, _browser))
+                                Send(new { evt = "domMissing", missing });
+                        }
+                        catch (Exception e) { Send(new { evt = "error", message = "DOM update failed: " + e.Message }); }
+                    }, TaskScheduler.Default);
+            }
+            catch (Exception e)
+            {
+                Send(new { evt = "error", message = "DOM update failed: " + e.Message });
+            }
+        });
     }
 
     private static void SetPaused(bool paused)
@@ -411,32 +372,23 @@ internal static unsafe class Program
         {
             _paused = paused;
             var host = _browser?.GetBrowserHost();
-            if (host == null)
-                return;
-
+            if (host == null) return;
             host.WasHidden(paused);
-            if (!paused)
-                host.Invalidate(PaintElementType.View);
+            if (!paused) host.Invalidate(PaintElementType.View);
         }
     }
 
     private static void OnPaint(object? sender, OnPaintEventArgs e)
     {
-        if (e.IsPopup || _paused)
-            return;
-
+        if (e.IsPopup || _paused) return;
         var width = e.Width;
         var height = e.Height;
-        if (width <= 0 || height <= 0)
-            return;
+        if (width <= 0 || height <= 0) return;
 
         lock (_gate)
         {
-            if (!ReferenceEquals(sender, _browser))
-                return;
-
-            if (_basePtr == null || width != _frameWidth || height != _frameHeight)
-                AllocateSharedMemory(width, height);
+            if (!ReferenceEquals(sender, _browser)) return;
+            if (_basePtr == null || width != _frameWidth || height != _frameHeight) AllocateSharedMemory(width, height);
 
             var counter = _frameCounter + 1;
             var destination = _basePtr + HeaderSize + (counter & 1) * _slotSize;
@@ -450,7 +402,6 @@ internal static unsafe class Program
     private static void AllocateSharedMemory(int width, int height)
     {
         ReleaseSharedMemory();
-
         _slotSize = (long)width * height * 4;
         var capacity = HeaderSize + 2 * _slotSize;
         var name = $"{_pipeName}-f{++_generation}";
@@ -478,12 +429,9 @@ internal static unsafe class Program
     {
         if (_view != null)
         {
-            if (_basePtr != null)
-                _view.SafeMemoryMappedViewHandle.ReleasePointer();
-
+            if (_basePtr != null) _view.SafeMemoryMappedViewHandle.ReleasePointer();
             _view.Dispose();
         }
-
         _mmf?.Dispose();
         _view = null;
         _mmf = null;
@@ -501,19 +449,14 @@ internal static unsafe class Program
 
     private static void Shutdown()
     {
-        ChromiumWebBrowser? browser;
-        lock (_gate)
+        Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            browser = DetachBrowserLocked();
-        }
+            ChromiumWebBrowser? browser;
+            lock (_gate) browser = DetachBrowserLocked();
+            try { browser?.Dispose(); } catch { }
+        }).Wait();
 
-        browser?.Dispose();
-
-        lock (_gate)
-        {
-            ReleaseSharedMemory();
-        }
-
+        lock (_gate) ReleaseSharedMemory();
         try { Cef.Shutdown(); } catch { }
     }
 
@@ -537,6 +480,3 @@ internal static unsafe class Program
                ? p.GetBoolean()
                : fallback;
 }
-
-
-

@@ -30,8 +30,7 @@ internal sealed class WebHostClient : IDisposable
         if (!string.IsNullOrWhiteSpace(env))
         {
             var candidate = Directory.Exists(env) ? Path.Combine(env, HostFileName) : env;
-            if (File.Exists(candidate))
-                return candidate;
+            if (File.Exists(candidate)) return candidate;
         }
 
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -76,7 +75,7 @@ internal sealed class WebHostClient : IDisposable
 
             _process.EnableRaisingEvents = true;
             _process.Exited += OnProcessExited;
-            _ = Task.Run(ReceiveLoop);
+            _receiveTask = Task.Run(ReceiveLoop);
             return true;
         }
         catch (Exception e)
@@ -243,9 +242,7 @@ internal sealed class WebHostClient : IDisposable
 
     private void EnqueueCommand(string json)
     {
-        if (_disposed)
-            return;
-
+        if (_disposed) return;
         _outbound.Writer.TryWrite(json);
     }
 
@@ -265,12 +262,10 @@ internal sealed class WebHostClient : IDisposable
         }
 
         var view = _currentView;
-        if (view == null)
-            return false;
+        if (view == null) return false;
 
         var counter = Volatile.Read(ref *(long*)view.Base);
-        if (counter <= _lastCounter)
-            return false;
+        if (counter <= _lastCounter) return false;
 
         _lastCounter = counter;
         var slot = counter & 1;
@@ -292,8 +287,7 @@ internal sealed class WebHostClient : IDisposable
             await foreach (var item in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 var json = item == DomFlushMarker ? BuildDomMessage() : item;
-                if (json == null)
-                    continue;
+                if (json == null) continue;
 
                 await writer.WriteLineAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync(ct).ConfigureAwait(false);
@@ -425,15 +419,19 @@ internal sealed class WebHostClient : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        
         _outbound.Writer.TryWrite("{\"cmd\":\"close\"}");
         _outbound.Writer.TryComplete();
 
         var process = _process;
         var pipe = _pipe;
+        
         _ = Task.Run(() =>
                      {
                          try { if (process != null && !process.WaitForExit(2000)) process.Kill(true); } catch { }
                          try { process?.Dispose(); } catch { }
+                         // Wait for the reader loop to finish and release the pipe
+                         try { _receiveTask?.Wait(2000); } catch { }
                          try { pipe?.Dispose(); } catch { }
                      });
 
@@ -490,6 +488,7 @@ internal sealed class WebHostClient : IDisposable
 
     private NamedPipeServerStream? _pipe;
     private Process? _process;
+    private Task? _receiveTask;
     private FrameView? _pendingView;
     private FrameView? _currentView;
     private long _lastCounter;
