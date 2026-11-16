@@ -75,7 +75,6 @@ Not covered: `new Date()` without arguments, video/audio playback, iframes.
 The script is injected before the page's own scripts (`Page.addScriptToEvaluateOnNewDocument`). The browser still
 paints on its own schedule (see **Fps**), so it should be at least as high as TiXL's frame rate. When rendering to a
 file, frames are not yet guaranteed to be the page's exact frame for each TiXL frame (a frame handshake is planned).
-
 ## DOM and CSS control (Phase 2)
 
 Connect modifier operators to the **Modifiers** input of the HtmlRenderer. They change elements of the loaded page

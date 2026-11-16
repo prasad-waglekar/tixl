@@ -133,6 +133,16 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
+    /// <summary>Sends TiXL's animation time (milliseconds) to the page clock. Only used when time sync is on.</summary>
+    public void SetTime(double milliseconds)
+    {
+        lock (_stateLock)
+        {
+            _timeMs = milliseconds;
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", ms = milliseconds }));
+        }
+    }
+
     public void SetPaused(bool paused)
     {
         lock (_stateLock)

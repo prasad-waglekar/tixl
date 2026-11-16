@@ -1,5 +1,6 @@
 #nullable enable
 using System.Diagnostics;
+using T3.Core.Animation;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -75,9 +76,11 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
-        if (_sessionUrl != url || _sessionTransparent != transparent)
+        if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
         {
-            _client.Open(url, width, height, fps, transparent);
+            _client.Open(url, width, height, fps, transparent, syncTime);
+            _sessionSyncTime = syncTime;
+            _lastSentTimeMs = double.NaN;
             _sessionUrl = url;
             _sessionTransparent = transparent;
             _appliedWidth = width;
@@ -337,7 +340,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     [Input(Guid = "17a2748d-b519-4b08-aac2-fafe6b02e89d")]
     public readonly InputSlot<bool> SyncToTiXLTime = new();
-
     [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")]
     public readonly MultiInputSlot<Command> Modifiers = new();
 }
