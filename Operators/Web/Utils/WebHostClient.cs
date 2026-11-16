@@ -22,6 +22,7 @@ internal sealed class WebHostClient : IDisposable
 
     public bool IsConnected => _isConnected;
     public bool IsLoading => _isLoading;
+    public bool IsFullyLoaded => _isFullyLoaded;
     public bool HostExited => _hostExited;
     public string? ErrorMessage => _errorMessage;
     public string? LoadError => _loadError;
@@ -105,6 +106,7 @@ internal sealed class WebHostClient : IDisposable
             _paused = false;
             _hasOpen = true;
             _isLoading = true;
+            _isFullyLoaded = false;
             _loadError = null;
             EnqueueCommand(BuildOpenJsonLocked());
         }
@@ -138,11 +140,20 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
+    public void SetTime(double time)
+    {
+        lock (_stateLock)
+        {
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", value = time }));
+        }
+    }
+
     public void Reload()
     {
         lock (_stateLock)
         {
             _isLoading = true;
+            _isFullyLoaded = false;
             _loadError = null;
             EnqueueCommand("{\"cmd\":\"reload\"}");
         }
@@ -230,7 +241,6 @@ internal sealed class WebHostClient : IDisposable
 
             lock (_stateLock)
             {
-                // Drain queued commands issued prior to connection and emit the latest open state once.
                 while (_outbound.Reader.TryRead(out _))
                 {
                 }
@@ -294,7 +304,15 @@ internal sealed class WebHostClient : IDisposable
             case "loading":
                 _isLoading = root.GetProperty("isLoading").GetBoolean();
                 if (_isLoading)
+                {
                     _loadError = null;
+                    _isFullyLoaded = false;
+                }
+                break;
+
+            case "fullyLoaded":
+                _isFullyLoaded = true;
+                _isLoading = false;
                 break;
 
             case "loadError":
@@ -454,6 +472,7 @@ internal sealed class WebHostClient : IDisposable
 
     private volatile bool _isConnected;
     private volatile bool _isLoading;
+    private volatile bool _isFullyLoaded;
     private volatile bool _hostExited;
     private volatile bool _disposed;
     private volatile string? _errorMessage;

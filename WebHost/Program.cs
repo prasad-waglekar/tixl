@@ -182,9 +182,28 @@ internal static unsafe class Program
                 SetPaused(GetBool(root, "value", false));
                 break;
 
+            case "time":
+                lock (_gate)
+                {
+                    var time = root.TryGetProperty("value", out var p) ? p.GetDouble() : 0.0;
+                    UpdateBrowserTime(time);
+                }
+                break;
+
             case "close":
                 _exit.Set();
                 break;
+        }
+    }
+
+    private static void UpdateBrowserTime(double timeSeconds)
+    {
+        var browser = _browser;
+        if (browser != null && browser.IsInitialized)
+        {
+            browser.ExecuteScriptAsync($"if (typeof window.setTiXLTime === 'function') window.setTiXLTime({timeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
+            var host = browser.GetBrowserHost();
+            host?.Invalidate(PaintElementType.View);
         }
     }
 
@@ -197,7 +216,6 @@ internal static unsafe class Program
             _paused = paused;
         }
 
-        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
         previous?.Dispose();
 
         var browserSettings = new BrowserSettings
@@ -219,8 +237,24 @@ internal static unsafe class Program
 
                                  Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
+        browser.FrameLoadEnd += (_, e) =>
+                                {
+                                    if (e.Frame.IsMain)
+                                    {
+                                        e.Browser.MainFrame.ExecuteJavaScriptAsync(
+                                            "if (document.readyState === 'complete') { console.log('[TIXL_READY]'); }" +
+                                            "else { window.addEventListener('load', () => console.log('[TIXL_READY]')); }"
+                                        );
+                                    }
+                                };
         browser.ConsoleMessage += (_, e) =>
                                   {
+                                      if (e.Message.Contains("[TIXL_READY]"))
+                                      {
+                                          Send(new { evt = "fullyLoaded" });
+                                          return;
+                                      }
+
                                       var now = Environment.TickCount64;
                                       var prev = Interlocked.Read(ref _lastConsoleSendTicks);
                                       if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)

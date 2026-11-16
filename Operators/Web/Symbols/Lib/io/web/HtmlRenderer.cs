@@ -15,9 +15,13 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     [Output(Guid = "cd959652-45cc-44d6-b9b6-3112bd5da28c", DirtyFlagTrigger = DirtyFlagTrigger.Always)]
     public readonly Slot<Texture2D?> Texture = new();
 
+    [Output(Guid = "741e2a89-bc84-48f1-9c31-b219e48c14bc", DirtyFlagTrigger = DirtyFlagTrigger.Always)]
+    public readonly Slot<bool> IsReady = new();
+
     public HtmlRenderer()
     {
         Texture.UpdateAction = Update;
+        IsReady.UpdateAction = Update;
     }
 
     private void Update(EvaluationContext context)
@@ -46,6 +50,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         if (url == null || _startFailed)
         {
             Texture.Value = _texture;
+            IsReady.Value = false;
             return;
         }
 
@@ -58,6 +63,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
                 _startError = error;
                 _startFailed = true;
                 Texture.Value = _texture;
+                IsReady.Value = false;
                 return;
             }
 
@@ -108,6 +114,9 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _client.SetPaused(paused);
             _appliedPaused = paused;
         }
+
+        _client.SetTime(context.LocalTime);
+        IsReady.Value = _client.IsFullyLoaded;
 
         if (_client.TryGetFrame(out var frame))
         {
