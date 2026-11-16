@@ -1,0 +1,20 @@
+{
+  "FormatVersion": 3,
+  "Id": "8bb1eeb2-b94a-48c5-a1c4-8ee265709e97"/*CssProperty*/,
+  "Inputs": [
+    {
+      "Id": "749a77f0-f108-47b2-9fca-f3fa3ad15a39"/*Selector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "f5a475a0-3f89-496a-b6fd-0bd19a9247db"/*Property*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "0ed720d0-72a1-4fe3-b2ed-9786938fd163"/*Value*/,
+      "DefaultValue": ""
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}

@@ -25,6 +25,14 @@ internal static unsafe class Program
     private static ChromiumWebBrowser? _browser;
     private static volatile bool _paused;
     private static long _lastConsoleSendTicks;
+    private static volatile bool _syncTime;
+    private static double _lastTimeMs;
+
+    // DOM changes requested by TiXL (see DomHelper). Kept here so they can be applied again after every page load.
+    private static readonly object _domLock = new();
+    private static readonly Dictionary<string, string> _domState = new(); // key -> op as JSON array text
+    private static volatile bool _pageReady;
+    private static string _lastMissing = "[]";
 
     private static MemoryMappedFile? _mmf;
     private static MemoryMappedViewAccessor? _view;
@@ -153,12 +161,18 @@ internal static unsafe class Program
                      Dimension(GetInt(root, "height", 720)),
                      Math.Clamp(GetInt(root, "fps", 60), 1, 240),
                      GetBool(root, "transparent", false),
-                     GetBool(root, "paused", false));
+                     GetBool(root, "paused", false),
+                     GetBool(root, "syncTime", true));
                 break;
 
             case "reload":
+                _pageReady = false;
                 lock (_gate)
                     _browser?.Reload(true);
+                break;
+
+            case "dom":
+                HandleDom(root.GetProperty("ops"));
                 break;
 
             case "resize":
@@ -186,7 +200,7 @@ internal static unsafe class Program
                 lock (_gate)
                 {
                     var time = root.TryGetProperty("value", out var p) ? p.GetDouble() : 0.0;
-                    UpdateBrowserTime(time);
+                    SetTime(time);
                 }
                 break;
 
@@ -196,27 +210,25 @@ internal static unsafe class Program
         }
     }
 
-    private static void UpdateBrowserTime(double timeSeconds)
-    {
-        var browser = _browser;
-        if (browser != null && browser.IsBrowserInitialized)
-        {
-            var t = timeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            browser.ExecuteScriptAsync($"if (typeof window.__advanceTiXLClock === 'function') window.__advanceTiXLClock({t});");
-            var host = browser.GetBrowserHost();
-            host?.Invalidate(PaintElementType.View);
-        }
-    }
-
-    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused)
+    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused, bool syncTime)
     {
         ChromiumWebBrowser? previous;
         lock (_gate)
         {
             previous = DetachBrowserLocked();
             _paused = paused;
+            _syncTime = syncTime;
         }
 
+        // A new browser starts without any DOM changes; TiXL sends the full set again after the open command.
+        _pageReady = false;
+        lock (_domLock)
+        {
+            _domState.Clear();
+            _lastMissing = "[]";
+        }
+
+        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
         previous?.Dispose();
 
         var browserSettings = new BrowserSettings
@@ -227,10 +239,29 @@ internal static unsafe class Program
                                                             : Cef.ColorSetARGB(255, 255, 255, 255),
                                   };
 
-        var browser = new ChromiumWebBrowser(url, browserSettings);
+        var browser = new ChromiumWebBrowser("about:blank", browserSettings);
         browser.Size = new Size(width, height);
         browser.Paint += OnPaint;
-        browser.LoadingStateChanged += (_, e) => Send(new { evt = "loading", isLoading = e.IsLoading });
+
+        var nav = new NavState();
+        browser.LoadingStateChanged += (_, e) =>
+                                       {
+                                           if (!nav.Started)
+                                               return; // still on about:blank
+
+                                           Send(new { evt = "loading", isLoading = e.IsLoading });
+
+                                           if (e.IsLoading)
+                                           {
+                                               _pageReady = false;
+                                               return;
+                                           }
+
+                                           PageLoaded(browser);
+
+                                           // Run the page's first animation callbacks even if TiXL's time is standing still.
+                                           ApplyTime(browser);
+                                       };
         browser.LoadError += (_, e) =>
                              {
                                  if (e.ErrorCode == CefErrorCode.Aborted)
@@ -238,7 +269,7 @@ internal static unsafe class Program
 
                                  Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
-        
+
         // Inject the clock-shimming engine before the page runs its scripts
         browser.FrameLoadStart += (_, e) =>
         {
@@ -307,6 +338,116 @@ internal static unsafe class Program
         {
             _browser = browser;
         }
+
+        if (syncTime)
+            _ = StartWithTimeShimAsync(browser, url, nav);
+    }
+
+    private static async Task StartWithTimeShimAsync(ChromiumWebBrowser browser, string url, NavState nav)
+    {
+        try
+        {
+            await browser.WaitForInitialLoadAsync().ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            Send(new { evt = "error", message = "Time sync setup failed: " + e.Message });
+        }
+
+        if (!ReferenceEquals(browser, _browser))
+            return; // replaced in the meantime
+
+        nav.Started = true;
+        browser.LoadUrl(url);
+    }
+
+    private static void HandleDom(JsonElement ops)
+    {
+        // ops: [[kind, selector, name, value-or-null], ...]
+        lock (_domLock)
+        {
+            foreach (var op in ops.EnumerateArray())
+            {
+                var key = op[0].GetString() + "\u0001" + op[1].GetString() + "\u0001" + op[2].GetString();
+                if (op[3].ValueKind == JsonValueKind.Null)
+                    _domState.Remove(key);
+                else
+                    _domState[key] = op.GetRawText();
+            }
+        }
+
+        var browser = _browser;
+        if (browser != null && _pageReady)
+            _ = ApplyDomAsync(browser, ops.GetRawText());
+    }
+
+    private static void PageLoaded(ChromiumWebBrowser browser)
+    {
+        var frame = browser.GetMainFrame();
+        if (frame is not { IsValid: true })
+            return;
+
+        frame.ExecuteJavaScriptAsync(DomHelper.Source);
+        _pageReady = true;
+
+        string all;
+        lock (_domLock)
+            all = _domState.Count == 0 ? "" : "[" + string.Join(",", _domState.Values) + "]";
+
+        if (all.Length > 0)
+            _ = ApplyDomAsync(browser, all);
+    }
+
+    private static async Task ApplyDomAsync(ChromiumWebBrowser browser, string opsJson)
+    {
+        try
+        {
+            var frame = browser.GetMainFrame();
+            if (frame is not { IsValid: true })
+                return;
+
+            var response = await frame.EvaluateScriptAsync("window.__tixlDom?window.__tixlDom.apply(" + opsJson + "):'[]'").ConfigureAwait(false);
+            if (!response.Success || response.Result is not string missing)
+                return;
+
+            // Report only changes, so TiXL's status does not flicker and the pipe is not flooded.
+            bool changed;
+            lock (_domLock)
+            {
+                changed = missing != _lastMissing;
+                _lastMissing = missing;
+            }
+
+            if (changed && ReferenceEquals(browser, _browser))
+                Send(new { evt = "domMissing", missing });
+        }
+        catch (Exception e)
+        {
+            Send(new { evt = "error", message = "DOM update failed: " + e.Message });
+        }
+    }
+
+    private static void SetTime(double milliseconds)
+    {
+        _lastTimeMs = milliseconds;
+        ApplyTime(_browser);
+    }
+
+    private static void ApplyTime(ChromiumWebBrowser? browser)
+    {
+        if (browser == null || !_syncTime)
+            return;
+
+        var frame = browser.GetMainFrame();
+        if (frame is not { IsValid: true })
+            return;
+
+        frame.ExecuteJavaScriptAsync("window.__advanceTiXLClock && window.__advanceTiXLClock(" + (_lastTimeMs / 1000.0).ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ")");
+    }
+
+    private sealed class NavState
+    {
+        public volatile bool Started;
     }
 
     private static void SetPaused(bool paused)

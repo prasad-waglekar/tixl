@@ -1,0 +1,49 @@
+{
+  "FormatVersion": 3,
+  "Id": "e4500aed-7371-4c52-9a77-436a21362203"/*ElementAttribute*/,
+  "Description": "Sets (or removes) an attribute on every element that matches the selector, for example data-state, href, class or an SVG attribute like d or viewBox. Connect to the Modifiers input of an HtmlRenderer.",
+  "InputUis": [
+    {
+      "InputId": "63da7176-64ac-4560-b7ab-88ebb88d4bdb"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "CSS selector of the target elements, e.g. #logo path."
+    },
+    {
+      "InputId": "a7d71ef8-6b31-45b2-8408-7140972c20bc"/*AttributeName*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "Attribute name, e.g. class or data-state."
+    },
+    {
+      "InputId": "d9b8b567-28a6-4ef0-a172-418615392c59"/*Value*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "Attribute value."
+    },
+    {
+      "InputId": "be59651d-79cb-4e0b-9081-5adb2b4a7c27"/*Remove*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 225.0
+      },
+      "Description": "Removes the attribute instead of setting it."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "4d460ce2-e3d7-435d-9178-26208d7b51a9"/*Output*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

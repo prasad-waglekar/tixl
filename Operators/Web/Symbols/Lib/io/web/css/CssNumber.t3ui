@@ -1,0 +1,49 @@
+{
+  "FormatVersion": 3,
+  "Id": "d1081486-7cf6-4f77-9555-a836a2f6e5fe"/*CssNumber*/,
+  "Description": "Sets a CSS property to a number plus a unit, driven by any float connection (LFO, audio level, envelope). Examples: opacity 0..1, rotate in deg, --hue, width in px. Connect to the Modifiers input of an HtmlRenderer.",
+  "InputUis": [
+    {
+      "InputId": "1e4f379a-ed8f-463f-b27f-eef169946af8"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "CSS selector of the target elements, e.g. #logo path."
+    },
+    {
+      "InputId": "4f6e23e9-d4cf-4b7b-8f17-b53eb1f13822"/*Property*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "CSS property, e.g. opacity, rotate, scale, --hue, stroke-width."
+    },
+    {
+      "InputId": "8e35ad3c-4447-451c-b163-4511e9e27e3e"/*Value*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "The number."
+    },
+    {
+      "InputId": "0a79f4fb-f272-407b-882a-4d5922c1e875"/*Unit*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 225.0
+      },
+      "Description": "Unit appended to the number, e.g. deg, px, %, s. Empty for unit-less values like opacity or scale."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "54533ad0-d2de-4e89-88e4-acdc99dafc15"/*Output*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

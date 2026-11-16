@@ -1,0 +1,24 @@
+{
+  "FormatVersion": 3,
+  "Id": "d1081486-7cf6-4f77-9555-a836a2f6e5fe"/*CssNumber*/,
+  "Inputs": [
+    {
+      "Id": "1e4f379a-ed8f-463f-b27f-eef169946af8"/*Selector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "4f6e23e9-d4cf-4b7b-8f17-b53eb1f13822"/*Property*/,
+      "DefaultValue": "opacity"
+    },
+    {
+      "Id": "8e35ad3c-4447-451c-b163-4511e9e27e3e"/*Value*/,
+      "DefaultValue": 1.0
+    },
+    {
+      "Id": "0a79f4fb-f272-407b-882a-4d5922c1e875"/*Unit*/,
+      "DefaultValue": ""
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}

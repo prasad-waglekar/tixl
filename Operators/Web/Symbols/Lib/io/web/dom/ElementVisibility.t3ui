@@ -1,0 +1,41 @@
+{
+  "FormatVersion": 3,
+  "Id": "1122303e-2026-43ab-b0e8-d39e36e0ebde"/*ElementVisibility*/,
+  "Description": "Shows or hides every element that matches the selector. Connect to the Modifiers input of an HtmlRenderer. Visible removes TiXL's override, so the page's own styling applies again.",
+  "InputUis": [
+    {
+      "InputId": "35c88543-9628-47a9-9ed3-4c55262e4d8a"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "CSS selector of the target elements."
+    },
+    {
+      "InputId": "b63ecc86-1449-4876-a61d-f19c1346b887"/*Visible*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "Off hides the elements."
+    },
+    {
+      "InputId": "5c9c63b6-1eef-4152-a504-5d3fcebf8bd9"/*HideMode*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "Visibility keeps the element's space in the layout (visibility: hidden). Display removes it from the layout (display: none)."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "5f0151ba-9fe5-4488-a415-80736542bcc8"/*Output*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "FormatVersion": 3,
+  "Id": "8bb1eeb2-b94a-48c5-a1c4-8ee265709e97"/*CssProperty*/,
+  "Description": "Sets any CSS property on every element that matches the selector (element.style.setProperty), including custom properties such as --hue. Connect to the Modifiers input of an HtmlRenderer. An empty value removes TiXL's override.",
+  "InputUis": [
+    {
+      "InputId": "749a77f0-f108-47b2-9fca-f3fa3ad15a39"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "CSS selector of the target elements, e.g. #logo path."
+    },
+    {
+      "InputId": "f5a475a0-3f89-496a-b6fd-0bd19a9247db"/*Property*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "CSS property, e.g. fill, background, opacity, transform or a custom property like --hue."
+    },
+    {
+      "InputId": "0ed720d0-72a1-4fe3-b2ed-9786938fd163"/*Value*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "Value as text, e.g. #ff3a9e, linear-gradient(45deg, red, blue) or rotate(45deg). Empty removes the override."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "2c2d59c3-bce5-4296-b95e-3931e94d1627"/*Output*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

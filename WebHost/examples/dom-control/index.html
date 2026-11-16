@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TiXL DOM control</title>
+  <style>
+    /* Nothing here animates by itself: the TiXL graph drives the page through the Modifiers input. */
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: transparent;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #fff;
+    }
+    body { display: grid; place-items: center; }
+
+    #card {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      padding: 24px 36px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #1b2a4a, #3a1b4a);
+    }
+
+    .title { margin: 0; font-size: 36px; letter-spacing: 0.03em; }
+    #logo { width: 300px; height: 300px; }
+
+    /* Rotate SVG shapes around their own center instead of the SVG origin. */
+    #spinner { transform-box: fill-box; transform-origin: center; }
+    .petal { fill: #888; }
+
+    #visualizer { display: flex; align-items: flex-end; gap: 6px; height: 80px; }
+    #visualizer .bar { width: 14px; height: 100%; background: #3aa0ff; transform-origin: bottom; }
+  </style>
+</head>
+<body>
+  <div id="card">
+    <h1 class="title" id="title">DOM control</h1>
+
+    <svg id="logo" viewBox="0 0 200 200" role="img" aria-label="logo">
+      <g id="spinner">
+        <path id="petal-1" class="petal" d="M100 100 L180 100 A80 80 0 0 1 100 180 Z"/>
+        <path id="petal-2" class="petal" d="M100 100 L100 180 A80 80 0 0 1 20 100 Z"/>
+        <path id="petal-3" class="petal" d="M100 100 L20 100 A80 80 0 0 1 100 20 Z"/>
+        <path id="petal-4" class="petal" d="M100 100 L100 20 A80 80 0 0 1 180 100 Z"/>
+      </g>
+      <circle id="core" cx="100" cy="100" r="18" fill="#111"/>
+    </svg>
+
+    <div id="visualizer" aria-hidden="true">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    </div>
+  </div>
+</body>
+</html>

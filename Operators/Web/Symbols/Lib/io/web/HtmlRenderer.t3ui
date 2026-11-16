@@ -60,6 +60,14 @@
         "Y": 360.0
       },
       "Description": "Drives the page clock (requestAnimationFrame, timers, performance.now, Date.now, CSS/Web/SVG animations) from TiXL's animation time. The page then animates only while TiXL plays or Idle Motion is on, and follows the timeline when you scrub. Switch off to let the page run on its own clock. Changing this reloads the page."
+    },
+    {
+      "InputId": "e577b060-f80d-4f22-ae82-b9a1691ce481"/*Modifiers*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 405.0
+      },
+      "Description": "Connect CssProperty, CssNumber, CssColor, ElementAttribute and ElementVisibility operators here. They change the elements of the loaded page without reloading it."
     }
   ],
   "SymbolChildUis": [],

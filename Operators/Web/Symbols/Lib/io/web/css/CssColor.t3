@@ -1,0 +1,25 @@
+{
+  "FormatVersion": 3,
+  "Id": "9c72df6b-c56f-46b3-836d-5f14a6cf1b01"/*CssColor*/,
+  "Inputs": [
+    {
+      "Id": "3494989d-93a5-4e21-a01d-5fdcd94df26f"/*Selector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "b4b79780-5931-4a6f-8711-e45ae32d96f4"/*Property*/,
+      "DefaultValue": "fill"
+    },
+    {
+      "Id": "90c629c9-a3e1-47a8-a5f6-f56de6a48300"/*Color*/,
+      "DefaultValue": {
+        "X": 1.0,
+        "Y": 1.0,
+        "Z": 1.0,
+        "W": 1.0
+      }
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}

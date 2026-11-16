@@ -1,0 +1,24 @@
+{
+  "FormatVersion": 3,
+  "Id": "a3edfbcd-e96c-4bac-be9e-0180753ec2e9"/*ElementSelector*/,
+  "Inputs": [
+    {
+      "Id": "ff1fe235-0cf0-44d4-b826-cf2a16dc06f6"/*ParentSelector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "37a0891c-642a-4162-817b-ae89941d0156"/*Selector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "5e512a6a-8982-4d3e-8d23-3717230f88e3"/*Relation*/,
+      "DefaultValue": 0
+    },
+    {
+      "Id": "89b77332-0f2e-4eab-913d-7e5295ca7e08"/*Nth*/,
+      "DefaultValue": 0
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}

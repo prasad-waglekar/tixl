@@ -75,3 +75,42 @@ Not covered: `new Date()` without arguments, video/audio playback, iframes.
 The script is injected before the page's own scripts (`Page.addScriptToEvaluateOnNewDocument`). The browser still
 paints on its own schedule (see **Fps**), so it should be at least as high as TiXL's frame rate. When rendering to a
 file, frames are not yet guaranteed to be the page's exact frame for each TiXL frame (a frame handshake is planned).
+
+## DOM and CSS control (Phase 2)
+
+Connect modifier operators to the **Modifiers** input of the HtmlRenderer. They change elements of the loaded page
+without reloading it. Only values that changed are sent to the browser, in one batch per frame.
+
+| Operator (library path) | What it does |
+|---|---|
+| `lib.io.web.dom.ElementSelector` | Builds a CSS selector from a parent, a selector, a relation (descendant, child, same element, next sibling, later siblings) and an optional n-th match. Output: string. |
+| `lib.io.web.css.CssProperty` | Sets any CSS property (`element.style.setProperty`) from text. Works for custom properties such as `--hue`. Empty value removes the override. |
+| `lib.io.web.css.CssNumber` | Sets a property to a float plus unit (for example `rotate` in `deg`, `opacity`, `--hue`). Connect LFOs, audio levels, envelopes. |
+| `lib.io.web.css.CssColor` | Sets a color property (`fill`, `stroke`, `color`, `background-color`, ...) from a TiXL color. |
+| `lib.io.web.dom.ElementAttribute` | Sets or removes an attribute (`class`, `data-*`, SVG attributes such as `d`). |
+| `lib.io.web.dom.ElementVisibility` | Shows or hides elements (`visibility` or `display`). Visible removes the override. |
+
+The **Selector** input of every operator takes plain CSS selectors typed in, or the output of an ElementSelector.
+All matching elements are changed. Examples: `#logo`, `.title`, `svg path`, `#visualizer .bar`, `#spinner > path`.
+Elements that appear or disappear later are found automatically. If a selector matches nothing, or is invalid, the
+HtmlRenderer shows a warning: `No element matches: [...]`.
+
+When a modifier operator is disconnected, its change is undone (the style or attribute is removed again).
+The changes are applied again after every page reload.
+
+### Try it with `examples/dom-control`
+
+1. Set the HtmlRenderer **Path** to `WebHost\examples\dom-control\index.html`.
+2. Color one path: add `CssColor`, **Selector** `#spinner path:nth-of-type(2)` (or `ElementSelector` with ParentSelector `#spinner`,
+   Selector `path`, Nth `2`), **Property** `fill`, pick a color. Connect its output to the HtmlRenderer **Modifiers** input.
+3. Rotate with an LFO: add `CssNumber`, **Selector** `#spinner`, **Property** `rotate`, **Unit** `deg`. Connect an LFO
+   (scaled to 0..360) to **Value**, and the output to **Modifiers**. The page example sets `transform-box: fill-box`, so
+   SVG shapes rotate around their own center.
+4. Audio to opacity: add `CssNumber`, **Selector** `#logo`, **Property** `opacity`, connect an audio level (0..1) to **Value**.
+5. Hide the title: add `ElementVisibility`, **Selector** `#title`, switch **Visible** off.
+
+Notes:
+- `rotate`, `scale` and `translate` are CSS individual transform properties (Chromium 104 and newer). A full
+  `transform` value can be set with `CssProperty`.
+- A style set by TiXL wins over the page's stylesheet rules, but not over `!important` rules or running CSS animations.
+- To undo a change, disconnect the operator or clear its value in `CssProperty`.

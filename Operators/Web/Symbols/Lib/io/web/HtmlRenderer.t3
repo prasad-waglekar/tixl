@@ -32,6 +32,10 @@
     {
       "Id": "17a2748d-b519-4b08-aac2-fafe6b02e89d"/*SyncToTiXLTime*/,
       "DefaultValue": true
+    },
+    {
+      "Id": "e577b060-f80d-4f22-ae82-b9a1691ce481"/*Modifiers*/,
+      "DefaultValue": null
     }
   ],
   "Children": [],

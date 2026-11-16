@@ -130,8 +130,14 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _appliedPaused = paused;
         }
 
+<<<<<<< HEAD
         _client.SetTime(context.LocalTime);
         IsReady.Value = _client.IsFullyLoaded;
+=======
+        // DOM changes from the connected modifier operators (CssProperty, CssNumber, CssColor, ElementAttribute, ...).
+        CollectModifiers(context);
+        _client.SetDomOps(_domScope.Ops);
+>>>>>>> web: DOM and CSS control operators (Phase 2)
 
         if (_client.TryGetFrame(out var frame))
         {
@@ -163,6 +169,32 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         }
 
         Texture.Value = _texture;
+    }
+
+    /// <summary>
+    /// Evaluates the connected modifier operators. They add their DOM changes to the scope that is placed in the
+    /// context for the duration of this call; the client then sends only what changed.
+    /// </summary>
+    private void CollectModifiers(EvaluationContext context)
+    {
+        _domScope.Ops.Clear();
+
+        context.ObjectVariables.TryGetValue(WebDomOps.ContextKey, out var previous);
+        context.ObjectVariables[WebDomOps.ContextKey] = _domScope;
+        try
+        {
+            foreach (var input in Modifiers.CollectedInputs)
+                input.GetValue(context);
+        }
+        finally
+        {
+            if (previous != null)
+                context.ObjectVariables[WebDomOps.ContextKey] = previous;
+            else
+                context.ObjectVariables.Remove(WebDomOps.ContextKey);
+
+            Modifiers.DirtyFlag.Clear();
+        }
     }
 
     private static int PickSize(int fromInput, int requested)
@@ -253,6 +285,9 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         if (client.LoadError != null)
             return (IStatusProvider.StatusLevel.Error, client.LoadError);
 
+        if (client.MissingSelectors is { Length: > 2 } missing)
+            return (IStatusProvider.StatusLevel.Warning, "No element matches: " + missing);
+
         if (!client.IsConnected)
             return (IStatusProvider.StatusLevel.Notice, "Starting browser host...");
 
@@ -278,6 +313,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private bool _sessionTransparent;
     private bool _sessionSyncTime;
     private double _lastSentTimeMs = double.NaN;
+    private readonly WebDomOps _domScope = new();
     private int _appliedWidth;
     private int _appliedHeight;
     private int _appliedFps;
@@ -304,4 +340,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     [Input(Guid = "17a2748d-b519-4b08-aac2-fafe6b02e89d")]
     public readonly InputSlot<bool> SyncToTiXLTime = new();
+
+    [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")]
+    public readonly MultiInputSlot<Command> Modifiers = new();
 }

@@ -26,6 +26,7 @@ internal sealed class WebHostClient : IDisposable
     public bool HostExited => _hostExited;
     public string? ErrorMessage => _errorMessage;
     public string? LoadError => _loadError;
+    public string? MissingSelectors => _missingSelectors;
     public bool HasFrame => _lastCounter > 0;
 
     /// <summary>Looks for the host in %TIXL_WEBHOST% (file or folder), then %LOCALAPPDATA%\TiXL\WebHost.</summary>
@@ -109,7 +110,9 @@ internal sealed class WebHostClient : IDisposable
             _isLoading = true;
             _isFullyLoaded = false;
             _loadError = null;
+            _missingSelectors = null;
             EnqueueCommand(BuildOpenJsonLocked());
+            ResendAllDomLocked();
         }
     }
 
@@ -170,6 +173,80 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Tells the client which DOM changes the TiXL graph wants right now (called every frame). Only differences to the
+    /// previous call are sent, merged into one message. Changes are kept until the writer has sent them, so a busy
+    /// command queue can never lose one.
+    /// </summary>
+    internal void SetDomOps(List<DomOp> ops)
+    {
+        var changed = false;
+        lock (_stateLock)
+        {
+            _domSeen.Clear();
+            foreach (var op in ops)
+            {
+                var key = op.Key;
+                _domSeen.Add(key);
+                if (_domDesired.TryGetValue(key, out var old) && old.Value == op.Value)
+                    continue;
+
+                _domDesired[key] = op;
+                _domPending[key] = op;
+                changed = true;
+            }
+
+            if (_domDesired.Count > _domSeen.Count)
+            {
+                _domRemoved.Clear();
+                foreach (var key in _domDesired.Keys)
+                {
+                    if (!_domSeen.Contains(key))
+                        _domRemoved.Add(key);
+                }
+
+                foreach (var key in _domRemoved)
+                {
+                    var op = _domDesired[key];
+                    _domDesired.Remove(key);
+                    _domPending[key] = op with { Value = null }; // null value = remove the style/attribute again
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                EnqueueCommand(DomFlushMarker);
+        }
+    }
+
+    private void ResendAllDomLocked()
+    {
+        if (_domDesired.Count == 0)
+            return;
+
+        _domPending.Clear();
+        foreach (var pair in _domDesired)
+            _domPending[pair.Key] = pair.Value;
+
+        EnqueueCommand(DomFlushMarker);
+    }
+
+    private string? BuildDomMessage()
+    {
+        lock (_stateLock)
+        {
+            if (_domPending.Count == 0)
+                return null;
+
+            var list = new List<object?[]>(_domPending.Count);
+            foreach (var op in _domPending.Values)
+                list.Add(new object?[] { op.Kind.ToString(), op.Selector, op.Name, op.Value });
+
+            _domPending.Clear();
+            return JsonSerializer.Serialize(new { cmd = "dom", ops = list });
+        }
+    }
+
     private void EnqueueCommand(string json)
     {
         if (_disposed)
@@ -222,8 +299,12 @@ internal sealed class WebHostClient : IDisposable
     {
         try
         {
-            await foreach (var json in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var item in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
+                var json = item == DomFlushMarker ? BuildDomMessage() : item;
+                if (json == null)
+                    continue;
+
                 await writer.WriteLineAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync(ct).ConfigureAwait(false);
             }
@@ -258,6 +339,8 @@ internal sealed class WebHostClient : IDisposable
 
                 if (_hasOpen)
                     _outbound.Writer.TryWrite(BuildOpenJsonLocked());
+
+                ResendAllDomLocked();
             }
 
             sendCts = new CancellationTokenSource();
@@ -334,6 +417,10 @@ internal sealed class WebHostClient : IDisposable
             case "console":
                 Log.Debug($"[web] {root.GetProperty("level").GetString()}: {root.GetProperty("message").GetString()} " +
                           $"({root.GetProperty("source").GetString()}:{root.GetProperty("line").GetInt32()})");
+                break;
+
+            case "domMissing":
+                _missingSelectors = root.GetProperty("missing").GetString();
                 break;
 
             case "error":
@@ -457,7 +544,14 @@ internal sealed class WebHostClient : IDisposable
         private readonly MemoryMappedViewAccessor _accessor;
     }
 
+    private const string DomFlushMarker = "\u0001dom";
+
     private readonly object _stateLock = new();
+    private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
+    private readonly Dictionary<(char, string, string), DomOp> _domPending = new();
+    private readonly HashSet<(char, string, string)> _domSeen = new();
+    private readonly List<(char, string, string)> _domRemoved = new();
+    private volatile string? _missingSelectors;
     private readonly object _frameLock = new();
     private readonly Channel<string> _outbound = Channel.CreateBounded<string>(new BoundedChannelOptions(64)
                                                                                  {

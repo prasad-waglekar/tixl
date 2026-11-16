@@ -1,0 +1,20 @@
+{
+  "FormatVersion": 3,
+  "Id": "1122303e-2026-43ab-b0e8-d39e36e0ebde"/*ElementVisibility*/,
+  "Inputs": [
+    {
+      "Id": "35c88543-9628-47a9-9ed3-4c55262e4d8a"/*Selector*/,
+      "DefaultValue": ""
+    },
+    {
+      "Id": "b63ecc86-1449-4876-a61d-f19c1346b887"/*Visible*/,
+      "DefaultValue": true
+    },
+    {
+      "Id": "5c9c63b6-1eef-4152-a504-5d3fcebf8bd9"/*HideMode*/,
+      "DefaultValue": 0
+    }
+  ],
+  "Children": [],
+  "Connections": []
+}

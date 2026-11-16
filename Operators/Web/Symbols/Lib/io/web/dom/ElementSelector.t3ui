@@ -1,0 +1,49 @@
+{
+  "FormatVersion": 3,
+  "Id": "a3edfbcd-e96c-4bac-be9e-0180753ec2e9"/*ElementSelector*/,
+  "Description": "Builds a CSS selector, optionally relative to a parent selector. Connect the result to the Selector input of a CSS or element operator. Examples: #logo, .title, svg path, #visualizer .bar.",
+  "InputUis": [
+    {
+      "InputId": "ff1fe235-0cf0-44d4-b826-cf2a16dc06f6"/*ParentSelector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "Optional parent selector, for example #logo. Leave empty to select from the whole document."
+    },
+    {
+      "InputId": "37a0891c-642a-4162-817b-ae89941d0156"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "CSS selector, for example path, .bar or circle. A comma list (a, b) is allowed."
+    },
+    {
+      "InputId": "5e512a6a-8982-4d3e-8d23-3717230f88e3"/*Relation*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "How the selector relates to the parent: Descendant (any depth), DirectChild (>), SameElement (compound, e.g. path.active), NextSibling (+), SubsequentSibling (~)."
+    },
+    {
+      "InputId": "89b77332-0f2e-4eab-913d-7e5295ca7e08"/*Nth*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 225.0
+      },
+      "Description": "0 selects all matches. A number n adds :nth-of-type(n), which picks the n-th element of its type inside each parent."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "1f6f89de-446a-4556-a89f-b84333307d41"/*Result*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}

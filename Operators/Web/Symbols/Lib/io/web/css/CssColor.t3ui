@@ -1,0 +1,41 @@
+{
+  "FormatVersion": 3,
+  "Id": "9c72df6b-c56f-46b3-836d-5f14a6cf1b01"/*CssColor*/,
+  "Description": "Sets a color property (fill, stroke, color, background-color, ...) from a TiXL color. Connect to the Modifiers input of an HtmlRenderer.",
+  "InputUis": [
+    {
+      "InputId": "3494989d-93a5-4e21-a01d-5fdcd94df26f"/*Selector*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 90.0
+      },
+      "Description": "CSS selector of the target elements, e.g. #logo path."
+    },
+    {
+      "InputId": "b4b79780-5931-4a6f-8711-e45ae32d96f4"/*Property*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 135.0
+      },
+      "Description": "CSS property that takes a color: fill, stroke, color, background-color, border-color, ..."
+    },
+    {
+      "InputId": "90c629c9-a3e1-47a8-a5f6-f56de6a48300"/*Color*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 180.0
+      },
+      "Description": "The color (RGBA, 0 to 1)."
+    }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    {
+      "OutputId": "fd00b7f6-f443-4ea7-93d1-00bbceb24e5d"/*Output*/,
+      "Position": {
+        "X": 300.0,
+        "Y": 200.0
+      }
+    }
+  ]
+}
