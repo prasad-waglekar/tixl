@@ -1,9 +1,5 @@
 #nullable enable
 using System.Diagnostics;
-<<<<<<< HEAD
-using T3.Core.Animation;
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -79,17 +75,9 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
-<<<<<<< HEAD
-        if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
-        {
-            _client.Open(url, width, height, fps, transparent, syncTime);
-            _sessionSyncTime = syncTime;
-            _lastSentTimeMs = double.NaN;
-=======
         if (_sessionUrl != url || _sessionTransparent != transparent)
         {
             _client.Open(url, width, height, fps, transparent);
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
             _sessionUrl = url;
             _sessionTransparent = transparent;
             _appliedWidth = width;
@@ -139,14 +127,14 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _appliedPaused = paused;
         }
 
-<<<<<<< HEAD
         _client.SetTime(context.LocalTime);
-        IsReady.Value = _client.IsFullyLoaded;
-=======
-        // DOM changes from the connected modifier operators (CssProperty, CssNumber, CssColor, ElementAttribute, ...).
         CollectModifiers(context);
         _client.SetDomOps(_domScope.Ops);
->>>>>>> web: DOM and CSS control operators (Phase 2)
+        IsReady.Value = _client.IsFullyLoaded;
+=======
+        _client.SetTime(context.LocalTime);
+        IsReady.Value = _client.IsFullyLoaded;
+>>>>>>> cc458678e (WIP: local edits before time sync patch)
 
         if (_client.TryGetFrame(out var frame))
         {

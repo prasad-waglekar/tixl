@@ -110,13 +110,7 @@ internal sealed class WebHostClient : IDisposable
             _isLoading = true;
             _isFullyLoaded = false;
             _loadError = null;
-<<<<<<< HEAD
-            _missingSelectors = null;
             EnqueueCommand(BuildOpenJsonLocked());
-            ResendAllDomLocked();
-=======
-            EnqueueCommand(BuildOpenJsonLocked());
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -136,19 +130,6 @@ internal sealed class WebHostClient : IDisposable
         {
             _fps = fps;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
-<<<<<<< HEAD
-        }
-    }
-
-    /// <summary>Sends TiXL's animation time (milliseconds) to the page clock. Only used when time sync is on.</summary>
-    public void SetTime(double milliseconds)
-    {
-        lock (_stateLock)
-        {
-            _timeMs = milliseconds;
-            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", ms = milliseconds }));
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -158,7 +139,6 @@ internal sealed class WebHostClient : IDisposable
         {
             _paused = paused;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "pause", value = paused }));
-<<<<<<< HEAD
         }
     }
 
@@ -167,8 +147,6 @@ internal sealed class WebHostClient : IDisposable
         lock (_stateLock)
         {
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", value = time }));
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         }
     }
 
@@ -183,83 +161,6 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
-<<<<<<< HEAD
-    /// <summary>
-    /// Tells the client which DOM changes the TiXL graph wants right now (called every frame). Only differences to the
-    /// previous call are sent, merged into one message. Changes are kept until the writer has sent them, so a busy
-    /// command queue can never lose one.
-    /// </summary>
-    internal void SetDomOps(List<DomOp> ops)
-    {
-        var changed = false;
-        lock (_stateLock)
-        {
-            _domSeen.Clear();
-            foreach (var op in ops)
-            {
-                var key = op.Key;
-                _domSeen.Add(key);
-                if (_domDesired.TryGetValue(key, out var old) && old.Value == op.Value)
-                    continue;
-
-                _domDesired[key] = op;
-                _domPending[key] = op;
-                changed = true;
-            }
-
-            if (_domDesired.Count > _domSeen.Count)
-            {
-                _domRemoved.Clear();
-                foreach (var key in _domDesired.Keys)
-                {
-                    if (!_domSeen.Contains(key))
-                        _domRemoved.Add(key);
-                }
-
-                foreach (var key in _domRemoved)
-                {
-                    var op = _domDesired[key];
-                    _domDesired.Remove(key);
-                    _domPending[key] = op with { Value = null }; // null value = remove the style/attribute again
-                    changed = true;
-                }
-            }
-
-            if (changed)
-                EnqueueCommand(DomFlushMarker);
-        }
-    }
-
-    private void ResendAllDomLocked()
-    {
-        if (_domDesired.Count == 0)
-            return;
-
-        _domPending.Clear();
-        foreach (var pair in _domDesired)
-            _domPending[pair.Key] = pair.Value;
-
-        EnqueueCommand(DomFlushMarker);
-    }
-
-    private string? BuildDomMessage()
-    {
-        lock (_stateLock)
-        {
-            if (_domPending.Count == 0)
-                return null;
-
-            var list = new List<object?[]>(_domPending.Count);
-            foreach (var op in _domPending.Values)
-                list.Add(new object?[] { op.Kind.ToString(), op.Selector, op.Name, op.Value });
-
-            _domPending.Clear();
-            return JsonSerializer.Serialize(new { cmd = "dom", ops = list });
-        }
-    }
-
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
     private void EnqueueCommand(string json)
     {
         if (_disposed)
@@ -312,17 +213,8 @@ internal sealed class WebHostClient : IDisposable
     {
         try
         {
-<<<<<<< HEAD
-            await foreach (var item in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            {
-                var json = item == DomFlushMarker ? BuildDomMessage() : item;
-                if (json == null)
-                    continue;
-
-=======
             await foreach (var json in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
                 await writer.WriteLineAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync(ct).ConfigureAwait(false);
             }
@@ -351,21 +243,19 @@ internal sealed class WebHostClient : IDisposable
 
             lock (_stateLock)
             {
-<<<<<<< HEAD
-=======
                 // Drain queued commands issued prior to connection and emit the latest open state once.
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
+=======
+>>>>>>> cc458678e (WIP: local edits before time sync patch)
                 while (_outbound.Reader.TryRead(out _))
                 {
                 }
 
                 if (_hasOpen)
                     _outbound.Writer.TryWrite(BuildOpenJsonLocked());
-<<<<<<< HEAD
+                if (_hasOpen)
+                    _outbound.Writer.TryWrite(BuildOpenJsonLocked());
 
                 ResendAllDomLocked();
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
             }
 
             sendCts = new CancellationTokenSource();
@@ -510,11 +400,7 @@ internal sealed class WebHostClient : IDisposable
     }
 
     private string BuildOpenJsonLocked()
-<<<<<<< HEAD
         => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused, sync = _syncTime, timeMs = _timeMs });
-=======
-        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 
     public void Dispose()
     {
@@ -573,18 +459,12 @@ internal sealed class WebHostClient : IDisposable
         private readonly MemoryMappedViewAccessor _accessor;
     }
 
-<<<<<<< HEAD
-    private const string DomFlushMarker = "\u0001dom";
-
     private readonly object _stateLock = new();
     private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
     private readonly Dictionary<(char, string, string), DomOp> _domPending = new();
     private readonly HashSet<(char, string, string)> _domSeen = new();
     private readonly List<(char, string, string)> _domRemoved = new();
     private volatile string? _missingSelectors;
-=======
-    private readonly object _stateLock = new();
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
     private readonly object _frameLock = new();
     private readonly Channel<string> _outbound = Channel.CreateBounded<string>(new BoundedChannelOptions(64)
                                                                                  {

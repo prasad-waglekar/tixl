@@ -25,17 +25,6 @@ internal static unsafe class Program
     private static ChromiumWebBrowser? _browser;
     private static volatile bool _paused;
     private static long _lastConsoleSendTicks;
-<<<<<<< HEAD
-    private static volatile bool _syncTime;
-    private static double _lastTimeMs;
-
-    // DOM changes requested by TiXL (see DomHelper). Kept here so they can be applied again after every page load.
-    private static readonly object _domLock = new();
-    private static readonly Dictionary<string, string> _domState = new(); // key -> op as JSON array text
-    private static volatile bool _pageReady;
-    private static string _lastMissing = "[]";
-=======
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
 
     private static MemoryMappedFile? _mmf;
     private static MemoryMappedViewAccessor? _view;
@@ -203,7 +192,7 @@ internal static unsafe class Program
                 lock (_gate)
                 {
                     var time = root.TryGetProperty("value", out var p) ? p.GetDouble() : 0.0;
-                    SetTime(time);
+                    UpdateBrowserTime(time);
                 }
                 break;
 
@@ -213,135 +202,26 @@ internal static unsafe class Program
         }
     }
 
-    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused, bool syncTime)
+    private static void UpdateBrowserTime(double timeSeconds)
+    {
+        var browser = _browser;
+        if (browser != null && browser.IsInitialized)
+        {
+            browser.ExecuteScriptAsync($"if (typeof window.setTiXLTime === 'function') window.setTiXLTime({timeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
+            var host = browser.GetBrowserHost();
+            host?.Invalidate(PaintElementType.View);
+        }
+    }
+
+    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused)
     {
         ChromiumWebBrowser? previous;
         lock (_gate)
         {
             previous = DetachBrowserLocked();
             _paused = paused;
-<<<<<<< HEAD
-            _syncTime = syncTime;
         }
 
-        // A new browser starts without any DOM changes; TiXL sends the full set again after the open command.
-        _pageReady = false;
-        lock (_domLock)
-        {
-            _domState.Clear();
-            _lastMissing = "[]";
-        }
-
-        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
-        previous?.Dispose();
-
-        var browserSettings = new BrowserSettings
-                                  {
-                                      WindowlessFrameRate = fps,
-                                      BackgroundColor = transparent
-                                                            ? Cef.ColorSetARGB(0, 0, 0, 0)
-                                                            : Cef.ColorSetARGB(255, 255, 255, 255),
-                                  };
-
-        var browser = new ChromiumWebBrowser("about:blank", browserSettings);
-        browser.Size = new Size(width, height);
-        browser.Paint += OnPaint;
-
-        var nav = new NavState();
-        browser.LoadingStateChanged += (_, e) =>
-                                       {
-                                           if (!nav.Started)
-                                               return; // still on about:blank
-
-                                           Send(new { evt = "loading", isLoading = e.IsLoading });
-
-                                           if (e.IsLoading)
-                                           {
-                                               _pageReady = false;
-                                               return;
-                                           }
-
-                                           PageLoaded(browser);
-
-                                           // Run the page's first animation callbacks even if TiXL's time is standing still.
-                                           ApplyTime(browser);
-                                       };
-        browser.LoadError += (_, e) =>
-                             {
-                                 if (e.ErrorCode == CefErrorCode.Aborted)
-                                     return;
-
-                                 Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
-                             };
-
-        // Inject the clock-shimming engine before the page runs its scripts
-        browser.FrameLoadStart += (_, e) =>
-        {
-            if (e.Frame.IsMain)
-            {
-                e.Browser.ExecuteScriptAsync(@"
-                    window.__tixlTimeMs = 0;
-                    window.__tixlRafCallbacks = [];
-                    
-                    // Override requestAnimationFrame to be driven solely by TiXL time ticks
-                    window.requestAnimationFrame = function(cb) {
-                        window.__tixlRafCallbacks.push(cb);
-                        return window.__tixlRafCallbacks.length;
-                    };
-                    
-                    // Override performance.now and Date.now for time-dependent JS libraries (GSAP, Three.js, etc.)
-                    performance.now = function() { return window.__tixlTimeMs; };
-                    Date.now = function() { return window.__tixlTimeMs; };
-
-                    // Master clock advance function called by TiXL on every frame update
-                    window.__advanceTiXLClock = function(tSec) {
-                        window.__tixlTimeMs = tSec * 1000.0;
-                        
-                        // 1. Call user's setTiXLTime if defined
-                        if (typeof window.setTiXLTime === 'function') {
-                            window.setTiXLTime(tSec);
-                        }
-
-                        // 2. Dispatch pending requestAnimationFrame callbacks with virtual timestamp
-                        const cbs = window.__tixlRafCallbacks.splice(0);
-                        for (const cb of cbs) {
-                            try { cb(window.__tixlTimeMs); } catch(err) { console.error(err); }
-                        }
-                    };
-                ");
-            }
-        };
-
-        browser.FrameLoadEnd += (_, e) =>
-                                {
-                                    if (e.Frame.IsMain)
-                                    {
-                                        e.Browser.ExecuteScriptAsync(
-                                            "if (document.readyState === 'complete') { console.log('[TIXL_READY]'); }" +
-                                            "else { window.addEventListener('load', () => console.log('[TIXL_READY]')); }"
-                                        );
-                                    }
-                                };
-        browser.ConsoleMessage += (_, e) =>
-                                  {
-                                      if (e.Message.Contains("[TIXL_READY]"))
-                                      {
-                                          Send(new { evt = "fullyLoaded" });
-                                          return;
-                                      }
-
-                                      var now = Environment.TickCount64;
-                                      var prev = Interlocked.Read(ref _lastConsoleSendTicks);
-                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
-                                          return;
-
-                                      Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
-                                  };
-
-=======
-        }
-
-        // Dispose outside _gate to avoid blocking CEF's UI thread while OnPaint waits on _gate.
         previous?.Dispose();
 
         var browserSettings = new BrowserSettings
@@ -363,8 +243,24 @@ internal static unsafe class Program
 
                                  Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
+        browser.FrameLoadEnd += (_, e) =>
+                                {
+                                    if (e.Frame.IsMain)
+                                    {
+                                        e.Browser.MainFrame.ExecuteJavaScriptAsync(
+                                            "if (document.readyState === 'complete') { console.log('[TIXL_READY]'); }" +
+                                            "else { window.addEventListener('load', () => console.log('[TIXL_READY]')); }"
+                                        );
+                                    }
+                                };
         browser.ConsoleMessage += (_, e) =>
                                   {
+                                      if (e.Message.Contains("[TIXL_READY]"))
+                                      {
+                                          Send(new { evt = "fullyLoaded" });
+                                          return;
+                                      }
+
                                       var now = Environment.TickCount64;
                                       var prev = Interlocked.Read(ref _lastConsoleSendTicks);
                                       if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
@@ -373,7 +269,6 @@ internal static unsafe class Program
                                       Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
                                   };
 
->>>>>>> b4ddeadd9 (Stabilize out-of-process CEF web renderer and add transparent overlay test case)
         lock (_gate)
         {
             _browser = browser;
