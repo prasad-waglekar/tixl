@@ -3,20 +3,29 @@
 This fork extends **TiXL** with custom rendering and export capabilities designed for deterministic motion graphics and hybrid web-based workflows:
 
 ### 🌐 Out-of-Process HTML/CEF Renderer (`feature/htmlrenderer`)
-Render live HTML, CSS, JavaScript, and WebGL content directly as textures inside the TiXL node graph via an isolated **Chromium Embedded Framework (CEF)** host.
-* **Out-of-Process Architecture:** Runs the browser engine in a separate host process to keep CEF decoupled from TiXL's main real-time render loop.
-* **Deterministic Timeline Sync (`SyncToTiXLTime`):** Injects a clock shim that locks `requestAnimationFrame`, CSS animations, and page timers to TiXL's timeline—ensuring frame-accurate playback when scrubbing or rendering offline.
-* **Transparent Overlay Support:** Supports full alpha-channel compositing for layering web UI, kinetic typography, and HUD elements over 3D and shader scenes.
+Render live HTML, CSS, JavaScript, and WebGL content directly as textures inside the TiXL node graph via an isolated **Chromium Embedded Framework (CEF)** host (`TixlWebHost`).
+- **Out-of-Process Architecture:** Runs the browser engine in a separate host process via named pipes and memory-mapped shared memory ring buffers, keeping CEF decoupled from TiXL's main real-time render loop.
+- **Robust Process Isolation:** Enforces manual per-process `RootCachePath` generation to eliminate CEF single-instance locking and prevent `0x80000003` `CHECK()` crashes during multi-instance usage.
+- **Deterministic Timeline Sync (`SyncToTiXLTime`):** Injects a clock shim that locks `requestAnimationFrame`, CSS animations, and page timers to TiXL's timeline—ensuring frame-accurate playback when scrubbing or rendering offline.
+- **Transparent Overlay Support:** Supports full alpha-channel compositing for layering web UI, kinetic typography, and HUD elements over 3D and shader scenes.
+
+#### Web Modifiers & Operators
+| Category | Operator | Description |
+| :--- | :--- | :--- |
+| **Core** | `Html Renderer` | Manages the browser lifecycle, URL loading, transparency, framerate, and timeline synchronization. |
+| **CSS** | `Css Color`, `Css Number`, `Css Property` | Dynamically updates inline styles, CSS custom properties (`--variables`), and values on targeted DOM elements. |
+| **DOM** | `Element Text`, `Element Attribute`, `Element Selector`, `Element Visibility` | Modifies text content, HTML/SVG attributes, composite selectors, and element visibility states. |
+| **JS** | `Call JavaScript` | Invokes custom JavaScript functions exposed on `window` with JSON-parsed arguments (`window[fn](arg)`). |
 
 ### 🎞️ OpenEXR Export (`feature/exr-export`)
-* **High-Dynamic-Range Output:** Adds `.exr` image sequence export support for preserving linear color data and full bit-depth in downstream compositing pipelines (e.g., DaVinci Resolve Fusion, Blender, Nuke).
+- **High-Dynamic-Range Output:** Adds `.exr` image sequence export support for preserving linear color data and full bit-depth in downstream compositing pipelines (e.g., DaVinci Resolve Fusion, Blender, Nuke).
 
 ---
 
-### Active Feature Branches
+## Active Feature Branches
 | Branch | Description |
 | :--- | :--- |
-| [`feature/htmlrenderer`](https://github.com/prasad-waglekar/tixl/tree/feature/htmlrenderer) | `HtmlRenderer` operator, out-of-process CEF host, and deterministic timeline clock sync |
+| [`feature/htmlrenderer`](https://github.com/prasad-waglekar/tixl/tree/feature/htmlrenderer) | `HtmlRenderer` operator, out-of-process CEF host, IPC shared memory, web modifiers, and timeline clock sync |
 | [`feature/exr-export`](https://github.com/prasad-waglekar/tixl/tree/feature/exr-export) | Linear HDR OpenEXR image sequence rendering |
 
 # TiXL (Tooll3) - A realtime animation toolkit
