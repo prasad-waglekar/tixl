@@ -1,5 +1,6 @@
 // TixlWebHost - out-of-process Chromium (CEF, off-screen) renderer for TiXL's Web operators.
 using System.Diagnostics;
+using System.Globalization;
 using System.Drawing;
 using System.IO.MemoryMappedFiles;
 using System.IO.Pipes;
@@ -25,6 +26,8 @@ internal static unsafe class Program
     private static ChromiumWebBrowser? _browser;
     private static volatile bool _paused;
     private static long _lastConsoleSendTicks;
+    private static volatile bool _syncTime;
+    private static double _lastTimeMs;
 
     private static MemoryMappedFile? _mmf;
     private static MemoryMappedViewAccessor? _view;
@@ -153,7 +156,9 @@ internal static unsafe class Program
                      Dimension(GetInt(root, "height", 720)),
                      Math.Clamp(GetInt(root, "fps", 60), 1, 240),
                      GetBool(root, "transparent", false),
-                     GetBool(root, "paused", false));
+                     GetBool(root, "paused", false),
+                     GetBool(root, "sync", false),
+                     GetDouble(root, "timeMs", 0));
                 break;
 
             case "reload":
@@ -183,11 +188,7 @@ internal static unsafe class Program
                 break;
 
             case "time":
-                lock (_gate)
-                {
-                    var time = root.TryGetProperty("value", out var p) ? p.GetDouble() : 0.0;
-                    UpdateBrowserTime(time);
-                }
+                SetTime(GetDouble(root, "ms", 0));
                 break;
 
             case "close":
@@ -196,24 +197,15 @@ internal static unsafe class Program
         }
     }
 
-    private static void UpdateBrowserTime(double timeSeconds)
-    {
-        var browser = _browser;
-        if (browser != null && browser.IsInitialized)
-        {
-            browser.ExecuteScriptAsync($"if (typeof window.setTiXLTime === 'function') window.setTiXLTime({timeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)});");
-            var host = browser.GetBrowserHost();
-            host?.Invalidate(PaintElementType.View);
-        }
-    }
-
-    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused)
+    private static void Open(string url, int width, int height, int fps, bool transparent, bool paused, bool syncTime, double timeMs)
     {
         ChromiumWebBrowser? previous;
         lock (_gate)
         {
             previous = DetachBrowserLocked();
             _paused = paused;
+            _syncTime = syncTime;
+            _lastTimeMs = timeMs;
         }
 
         previous?.Dispose();
@@ -226,178 +218,16 @@ internal static unsafe class Program
                                                             : Cef.ColorSetARGB(255, 255, 255, 255),
                                   };
 
-        var browser = new ChromiumWebBrowser(url, browserSettings);
+        // With time sync the page must start only after the time script is registered, so begin on about:blank.
+        var nav = new NavState { Started = !syncTime };
+        var browser = new ChromiumWebBrowser(syncTime ? "about:blank" : url, browserSettings);
         browser.Size = new Size(width, height);
         browser.Paint += OnPaint;
-        browser.LoadingStateChanged += (_, e) => Send(new { evt = "loading", isLoading = e.IsLoading });
-        browser.LoadError += (_, e) =>
-                             {
-                                 if (e.ErrorCode == CefErrorCode.Aborted)
-                                     return;
+        browser.LoadingStateChanged += (_, e) =>
+                                       {
+                                           if (!nav.Started)
+                                               return; // still on about:blank
 
-                                 Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
-                             };
-        browser.FrameLoadEnd += (_, e) =>
-                                {
-                                    if (e.Frame.IsMain)
-                                    {
-                                        e.Browser.MainFrame.ExecuteJavaScriptAsync(
-                                            "if (document.readyState === 'complete') { console.log('[TIXL_READY]'); }" +
-                                            "else { window.addEventListener('load', () => console.log('[TIXL_READY]')); }"
-                                        );
-                                    }
-                                };
-        browser.ConsoleMessage += (_, e) =>
-                                  {
-                                      if (e.Message.Contains("[TIXL_READY]"))
-                                      {
-                                          Send(new { evt = "fullyLoaded" });
-                                          return;
-                                      }
+                                           Send(new { evt = "loading", isLoading = e.IsLoading });
 
-                                      var now = Environment.TickCount64;
-                                      var prev = Interlocked.Read(ref _lastConsoleSendTicks);
-                                      if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev)
-                                          return;
-
-                                      Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
-                                  };
-
-        lock (_gate)
-        {
-            _browser = browser;
-        }
-    }
-
-    private static void SetPaused(bool paused)
-    {
-        lock (_gate)
-        {
-            _paused = paused;
-            var host = _browser?.GetBrowserHost();
-            if (host == null)
-                return;
-
-            host.WasHidden(paused);
-            if (!paused)
-                host.Invalidate(PaintElementType.View);
-        }
-    }
-
-    private static void OnPaint(object? sender, OnPaintEventArgs e)
-    {
-        if (e.IsPopup || _paused)
-            return;
-
-        var width = e.Width;
-        var height = e.Height;
-        if (width <= 0 || height <= 0)
-            return;
-
-        lock (_gate)
-        {
-            if (!ReferenceEquals(sender, _browser))
-                return;
-
-            if (_basePtr == null || width != _frameWidth || height != _frameHeight)
-                AllocateSharedMemory(width, height);
-
-            var counter = _frameCounter + 1;
-            var destination = _basePtr + HeaderSize + (counter & 1) * _slotSize;
-            Buffer.MemoryCopy((void*)e.BufferHandle, destination, _slotSize, _slotSize);
-
-            _frameCounter = counter;
-            Volatile.Write(ref *(long*)_basePtr, counter);
-        }
-    }
-
-    private static void AllocateSharedMemory(int width, int height)
-    {
-        ReleaseSharedMemory();
-
-        _slotSize = (long)width * height * 4;
-        var capacity = HeaderSize + 2 * _slotSize;
-        var name = $"{_pipeName}-f{++_generation}";
-
-        _mmf = MemoryMappedFile.CreateNew(name, capacity, MemoryMappedFileAccess.ReadWrite);
-        _view = _mmf.CreateViewAccessor(0, capacity, MemoryMappedFileAccess.ReadWrite);
-
-        byte* pointer = null;
-        _view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-        _basePtr = pointer + _view.PointerOffset;
-
-        _frameWidth = width;
-        _frameHeight = height;
-        _frameCounter = 0;
-
-        *(long*)_basePtr = 0;
-        *(int*)(_basePtr + 8) = width;
-        *(int*)(_basePtr + 12) = height;
-        *(int*)(_basePtr + 16) = width * 4;
-
-        Send(new { evt = "frames", name, width, height, slotSize = _slotSize });
-    }
-
-    private static void ReleaseSharedMemory()
-    {
-        if (_view != null)
-        {
-            if (_basePtr != null)
-                _view.SafeMemoryMappedViewHandle.ReleasePointer();
-
-            _view.Dispose();
-        }
-
-        _mmf?.Dispose();
-        _view = null;
-        _mmf = null;
-        _basePtr = null;
-        _frameWidth = 0;
-        _frameHeight = 0;
-    }
-
-    private static ChromiumWebBrowser? DetachBrowserLocked()
-    {
-        var browser = _browser;
-        _browser = null;
-        return browser;
-    }
-
-    private static void Shutdown()
-    {
-        ChromiumWebBrowser? browser;
-        lock (_gate)
-        {
-            browser = DetachBrowserLocked();
-        }
-
-        browser?.Dispose();
-
-        lock (_gate)
-        {
-            ReleaseSharedMemory();
-        }
-
-        try { Cef.Shutdown(); } catch { }
-    }
-
-    private static void Send(object message)
-    {
-        var json = JsonSerializer.Serialize(message);
-        lock (_writeLock)
-        {
-            try { _writer?.WriteLine(json); }
-            catch (IOException) { _exit.Set(); }
-        }
-    }
-
-    private static int Dimension(int value) => Math.Clamp(value, 1, MaxDimension);
-
-    private static int GetInt(JsonElement element, string name, int fallback)
-        => element.TryGetProperty(name, out var p) && p.TryGetInt32(out var v) ? v : fallback;
-
-    private static bool GetBool(JsonElement element, string name, bool fallback)
-        => element.TryGetProperty(name, out var p) && (p.ValueKind == JsonValueKind.True || p.ValueKind == JsonValueKind.False)
-               ? p.GetBoolean()
-               : fallback;
-}
+                                           // Run the page's first animation callbacks even if TiXL's time is standing

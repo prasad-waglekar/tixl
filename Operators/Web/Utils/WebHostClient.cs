@@ -94,7 +94,7 @@ internal sealed class WebHostClient : IDisposable
 
     // ---- non-blocking outbound commands ----
 
-    public void Open(string url, int width, int height, int fps, bool transparent)
+    public void Open(string url, int width, int height, int fps, bool transparent, bool syncTime)
     {
         lock (_stateLock)
         {
@@ -103,6 +103,7 @@ internal sealed class WebHostClient : IDisposable
             _height = height;
             _fps = fps;
             _transparent = transparent;
+            _syncTime = syncTime;
             _paused = false;
             _hasOpen = true;
             _isLoading = true;
@@ -128,6 +129,16 @@ internal sealed class WebHostClient : IDisposable
         {
             _fps = fps;
             EnqueueCommand(JsonSerializer.Serialize(new { cmd = "fps", value = fps }));
+        }
+    }
+
+    /// <summary>Sends TiXL's animation time (milliseconds) to the page clock. Only used when time sync is on.</summary>
+    public void SetTime(double milliseconds)
+    {
+        lock (_stateLock)
+        {
+            _timeMs = milliseconds;
+            EnqueueCommand(JsonSerializer.Serialize(new { cmd = "time", ms = milliseconds }));
         }
     }
 
@@ -387,7 +398,7 @@ internal sealed class WebHostClient : IDisposable
     }
 
     private string BuildOpenJsonLocked()
-        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
+        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused, sync = _syncTime, timeMs = _timeMs });
 
     public void Dispose()
     {
@@ -467,6 +478,8 @@ internal sealed class WebHostClient : IDisposable
     private int _height = 720;
     private int _fps = 60;
     private bool _transparent;
+    private bool _syncTime;
+    private double _timeMs;
     private bool _paused;
     private bool _hasOpen;
 

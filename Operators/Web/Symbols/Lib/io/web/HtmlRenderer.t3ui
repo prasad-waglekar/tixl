@@ -52,6 +52,14 @@
         "Y": 315.0
       },
       "Description": "Toggle to reload the page. Also restarts the browser host after a crash or a failed start."
+    },
+    {
+      "InputId": "17a2748d-b519-4b08-aac2-fafe6b02e89d"/*SyncToTiXLTime*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 360.0
+      },
+      "Description": "Drives the page clock (requestAnimationFrame, timers, performance.now, Date.now, CSS/Web/SVG animations) from TiXL's animation time. The page then animates only while TiXL plays or Idle Motion is on, and follows the timeline when you scrub. Switch off to let the page run on its own clock. Changing this reloads the page."
     }
   ],
   "SymbolChildUis": [],

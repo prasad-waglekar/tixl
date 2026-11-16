@@ -61,3 +61,17 @@ Page `console.log` output appears in the TiXL log prefixed with `[web]`. Host lo
 ## Control protocol (for later phases)
 
 See the header comment of `Program.cs`. Phase 2+ will add `setStyle` / `exec` style commands to the same pipe.
+
+## Time sync (Sync To TiXL Time)
+
+By default the page clock is driven by TiXL's animation time (`LocalFxTime`): the page animates only while TiXL plays
+or Idle Motion is on, stands still when TiXL is paused, and follows the timeline when you scrub or loop it.
+Turn the input off to let the page run on its own clock. Changing it reloads the page.
+
+What follows TiXL time: `requestAnimationFrame` (callbacks receive TiXL time in ms), `setTimeout`/`setInterval`,
+`performance.now()`, `Date.now()`, CSS and Web Animations, SVG (SMIL) animations.
+Not covered: `new Date()` without arguments, video/audio playback, iframes.
+
+The script is injected before the page's own scripts (`Page.addScriptToEvaluateOnNewDocument`). The browser still
+paints on its own schedule (see **Fps**), so it should be at least as high as TiXL's frame rate. When rendering to a
+file, frames are not yet guaranteed to be the page's exact frame for each TiXL frame (a frame handshake is planned).

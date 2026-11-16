@@ -1,5 +1,6 @@
 #nullable enable
 using System.Diagnostics;
+using T3.Core.Animation;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
 
@@ -31,6 +32,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         var fps = Math.Clamp(Fps.GetValue(context), 1, 240);
         var transparent = Transparent.GetValue(context);
         var paused = Paused.GetValue(context);
+        var syncTime = SyncToTiXLTime.GetValue(context);
 
         var reloadTriggered = MathUtils.WasTriggered(Reload.GetValue(context), ref _reloadState);
         if (reloadTriggered)
@@ -74,9 +76,11 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
-        if (_sessionUrl != url || _sessionTransparent != transparent)
+        if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
         {
-            _client.Open(url, width, height, fps, transparent);
+            _client.Open(url, width, height, fps, transparent, syncTime);
+            _sessionSyncTime = syncTime;
+            _lastSentTimeMs = double.NaN;
             _sessionUrl = url;
             _sessionTransparent = transparent;
             _appliedWidth = width;
@@ -107,6 +111,17 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
             if (reloadTriggered)
                 _client.Reload();
+        }
+
+        if (syncTime)
+        {
+            // LocalFxTime advances while TiXL plays or Idle Motion is on, stands still otherwise, and follows scrubbing.
+            var timeMs = Playback.Current.SecondsFromBars(context.LocalFxTime) * 1000.0;
+            if (double.IsNaN(_lastSentTimeMs) || Math.Abs(timeMs - _lastSentTimeMs) > 0.0005)
+            {
+                _client.SetTime(timeMs);
+                _lastSentTimeMs = timeMs;
+            }
         }
 
         if (paused != _appliedPaused)
@@ -261,6 +276,8 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     private string? _sessionUrl;
     private bool _sessionTransparent;
+    private bool _sessionSyncTime;
+    private double _lastSentTimeMs = double.NaN;
     private int _appliedWidth;
     private int _appliedHeight;
     private int _appliedFps;
@@ -284,4 +301,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     [Input(Guid = "693a8174-cef1-42fc-95e2-3a8299169663")]
     public readonly InputSlot<bool> Reload = new();
+
+    [Input(Guid = "17a2748d-b519-4b08-aac2-fafe6b02e89d")]
+    public readonly InputSlot<bool> SyncToTiXLTime = new();
 }
