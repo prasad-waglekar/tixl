@@ -1,0 +1,10 @@
+﻿{
+  "FormatVersion": 3,
+  "Id": "7a3e9b1d-4c52-4e01-9b8a-2f1d6e3a5c7f"/*ElementText*/,
+  "Inputs": [
+    { "Id": "1c4e6a8b-2d5f-4a7c-9e1b-3d5f7a9c1e2b"/*Selector*/, "DefaultValue": "" },
+    { "Id": "2d5f7a9b-3e6a-4b8c-a0d2-4e6a8b0c2d3e"/*Text*/, "DefaultValue": "" }
+  ],
+  "Children": [],
+  "Connections": []
+}

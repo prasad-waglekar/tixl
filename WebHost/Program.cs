@@ -171,7 +171,7 @@ internal static unsafe class Program
                 break;
 
             case "dom":
-                HandleDom(root.GetProperty("ops"));
+                HandleDom(root);
                 break;
 
             case "resize":
@@ -324,24 +324,28 @@ internal static unsafe class Program
         browser.LoadUrl(url);
     }
 
-    private static void HandleDom(JsonElement ops)
+    private static void HandleDom(JsonElement root)
     {
-        var opsJson = ops.GetRawText();
-        lock (_domLock)
+        if (root.TryGetProperty("ops", out var opsElement))
         {
-            foreach (var op in ops.EnumerateArray())
+            lock (_domLock)
             {
-                var key = op[0].GetString() + "\u0001" + op[1].GetString() + "\u0001" + op[2].GetString();
-                if (op[3].ValueKind == JsonValueKind.Null)
-                    _domState.Remove(key);
-                else
-                    _domState[key] = op.GetRawText();
+                foreach (var op in opsElement.EnumerateArray())
+                {
+                    var key = op[0].GetString() + "\u0001" + op[1].GetString() + "\u0001" + op[2].GetString();
+                    if (op[3].ValueKind == JsonValueKind.Null) _domState.Remove(key);
+                    else _domState[key] = op.GetRawText();
+                }
             }
         }
 
         var browser = _browser;
         if (browser != null && _pageReady)
-            _ = ApplyDomAsync(browser, opsJson);
+        {
+            var opsJson = root.TryGetProperty("ops", out var o) ? o.GetRawText() : "[]";
+            var callsJson = root.TryGetProperty("calls", out var c2) ? c2.GetRawText() : "[]";
+            _ = ApplyDomAsync(browser, opsJson, callsJson);
+        }
     }
 
     private static void PageLoaded(ChromiumWebBrowser browser)
@@ -358,35 +362,46 @@ internal static unsafe class Program
             all = _domState.Count == 0 ? "" : "[" + string.Join(",", _domState.Values) + "]";
 
         if (all.Length > 0)
-            _ = ApplyDomAsync(browser, all);
+            _ = ApplyDomAsync(browser, all, "[]");
     }
 
-    private static async Task ApplyDomAsync(ChromiumWebBrowser browser, string opsJson)
+    private static Task ApplyDomAsync(ChromiumWebBrowser browser, string opsJson, string callsJson)
     {
         try
         {
             var frame = browser.GetMainFrame();
             if (frame is not { IsValid: true })
-                return;
+                return Task.CompletedTask;
 
-            var response = await frame.EvaluateScriptAsync("window.__tixlDom?window.__tixlDom.apply(" + opsJson + "):'[]'").ConfigureAwait(false);
-            browser.GetBrowserHost()?.Invalidate(PaintElementType.View);
-            if (!response.Success || response.Result is not string missing)
-                return;
-
-            bool changed;
-            lock (_domLock)
+            var evalTask = frame.EvaluateScriptAsync(
+                "window.__tixlDom?window.__tixlDom.apply(" + opsJson + "," + callsJson + "):'[]'");
+            return evalTask.ContinueWith(t =>
             {
-                changed = missing != _lastMissing;
-                _lastMissing = missing;
-            }
+                try
+                {
+                    if (!t.IsCompletedSuccessfully || !t.Result.Success || t.Result.Result is not string missing)
+                        return;
 
-            if (changed && ReferenceEquals(browser, _browser))
-                Send(new { evt = "domMissing", missing });
+                    bool changed;
+                    lock (_domLock)
+                    {
+                        changed = missing != _lastMissing;
+                        _lastMissing = missing;
+                    }
+
+                    if (changed && ReferenceEquals(browser, _browser))
+                        Send(new { evt = "domMissing", missing });
+                }
+                catch (Exception e)
+                {
+                    Send(new { evt = "error", message = "DOM update failed: " + e.Message });
+                }
+            }, TaskScheduler.Default);
         }
         catch (Exception e)
         {
             Send(new { evt = "error", message = "DOM update failed: " + e.Message });
+            return Task.CompletedTask;
         }
     }
 
@@ -522,3 +537,6 @@ internal static unsafe class Program
                ? p.GetBoolean()
                : fallback;
 }
+
+
+

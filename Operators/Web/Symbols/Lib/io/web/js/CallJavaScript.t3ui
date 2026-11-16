@@ -1,0 +1,13 @@
+﻿{
+  "FormatVersion": 3,
+  "Id": "4f8b2d1e-7a3c-4e5b-9d6a-1b3d5f7a9c2e"/*CallJavaScript*/,
+  "Description": "Calls a JavaScript function exposed by the loaded page, e.g. window.play or window.setData. Fires when Function or Argument changes, not every frame. Connect to the Modifiers input of an HtmlRenderer.",
+  "InputUis": [
+    { "InputId": "6b2f4a8c-0c5a-4b3d-9f7c-1e3a5b7d9f2c"/*Function*/, "Position": { "X": -200.0, "Y": 90.0 }, "Description": "Name of a function on the page's window object. Called as window[name](argument)." },
+    { "InputId": "7c3a5b9d-1d6b-4c4e-a0d8-2f4a6c8e0a3d"/*Argument*/, "Position": { "X": -200.0, "Y": 135.0 }, "Description": "Argument passed to the function. Parsed as JSON if possible, otherwise passed as a plain string." }
+  ],
+  "SymbolChildUis": [],
+  "OutputUis": [
+    { "OutputId": "5a1e3c7d-9b4f-4a2c-8e6b-0d2f4a6c8e1b"/*Output*/, "Position": { "X": 300.0, "Y": 200.0 } }
+  ]
+}

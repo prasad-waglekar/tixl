@@ -1,4 +1,4 @@
-namespace TixlWebHost;
+﻿namespace TixlWebHost;
 
 /// <summary>
 /// JavaScript injected into every loaded page. It applies batches of DOM changes from the TiXL Web operators
@@ -35,7 +35,7 @@ internal static class DomHelper
             return list;
           }
 
-          function apply(ops) {
+          function apply(ops, calls) {
             observe();
             var missing = [];
             for (var i = 0; i < ops.length; i++) {
@@ -51,6 +51,13 @@ internal static class DomHelper
                 if (missing.indexOf(selector) < 0) missing.push(selector);
                 continue;
               }
+              if (kind === 't') {
+                if (value === null) continue;
+                for (var j = 0; j < list.length; j++) {
+                  try { list[j].textContent = value; } catch (e) { }
+                }
+                continue;
+              }
               for (var j = 0; j < list.length; j++) {
                 var element = list[j];
                 try {
@@ -62,6 +69,18 @@ internal static class DomHelper
                 } catch (e) { }
               }
             }
+            if (calls) {
+              for (var k = 0; k < calls.length; k++) {
+                var fn = calls[k][0], raw = calls[k][1];
+                try {
+                  var f = window[fn];
+                  if (typeof f !== 'function') continue;
+                  var arg = raw;
+                  try { arg = raw === '' ? undefined : JSON.parse(raw); } catch (e) { }
+                  f(arg);
+                } catch (e) { }
+              }
+            }
             return JSON.stringify(missing);
           }
 
@@ -69,3 +88,5 @@ internal static class DomHelper
         })();
         """;
 }
+
+

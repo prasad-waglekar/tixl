@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 using System.Diagnostics;
 using T3.Core.Resource.Assets;
 using T3.Core.Utils;
@@ -120,7 +120,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         // Collect and send connected DOM/CSS modifier operators (CssColor, CssNumber, etc.)
         CollectModifiers(context);
-        _client.SetDomOps(_domScope.Ops);
+        _client.SetDomOps(_domScope.Ops, _domScope.Calls);
 
         if (_client.TryGetFrame(out var frame))
         {
@@ -157,6 +157,8 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private void CollectModifiers(EvaluationContext context)
     {
         _domScope.Ops.Clear();
+        _domScope.Calls.Clear();
+        _domScope.Calls.Clear();
 
         context.ObjectVariables.TryGetValue(WebDomOps.ContextKey, out var previous);
         context.ObjectVariables[WebDomOps.ContextKey] = _domScope;
@@ -264,7 +266,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         if (client.LoadError != null)
             return (IStatusProvider.StatusLevel.Error, client.LoadError);
 
-        if (client.MissingSelectors is { Length: > 2 } missing)
+        if (client.MissingSelectors is { } missing)
             return (IStatusProvider.StatusLevel.Warning, "No element matches: " + missing);
 
         if (!client.IsConnected)
@@ -318,3 +320,5 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")]
     public readonly MultiInputSlot<Command> Modifiers = new();
 }
+
+

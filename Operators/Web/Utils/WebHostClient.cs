@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using System.IO.Pipes;
@@ -26,7 +26,7 @@ internal sealed class WebHostClient : IDisposable
     public bool HostExited => _hostExited;
     public string? ErrorMessage => _errorMessage;
     public string? LoadError => _loadError;
-    public string? MissingSelectors => _missingSelectors;
+    public string? MissingSelectors => _missingSelectors == "[]" ? null : _missingSelectors;
     public bool HasFrame => _lastCounter > 0;
 
     /// <summary>Looks for the host in %TIXL_WEBHOST% (file or folder), then %LOCALAPPDATA%\TiXL\WebHost.</summary>
@@ -205,6 +205,7 @@ internal sealed class WebHostClient : IDisposable
 
     private void ResendAllDomLocked()
     {
+        _domFlushQueued = false;
         if (_domDesired.Count == 0)
             return;
 
@@ -212,22 +213,29 @@ internal sealed class WebHostClient : IDisposable
         foreach (var pair in _domDesired)
             _domPending[pair.Key] = pair.Value;
 
-        EnqueueCommand(DomFlushMarker);
+        if (_outbound.Writer.TryWrite(DomFlushMarker))
+            _domFlushQueued = true;
     }
 
     private string? BuildDomMessage()
     {
         lock (_stateLock)
         {
-            if (_domPending.Count == 0)
+            _domFlushQueued = false;
+            if (_domPending.Count == 0 && _pendingCalls.Count == 0)
                 return null;
 
             var list = new List<object?[]>(_domPending.Count);
             foreach (var op in _domPending.Values)
                 list.Add(new object?[] { op.Kind.ToString(), op.Selector, op.Name, op.Value });
-
             _domPending.Clear();
-            return JsonSerializer.Serialize(new { cmd = "dom", ops = list });
+
+            var calls = new List<object?[]>(_pendingCalls.Count);
+            foreach (var call in _pendingCalls)
+                calls.Add(new object?[] { call.Function, call.Argument });
+            _pendingCalls.Clear();
+
+            return JsonSerializer.Serialize(new { cmd = "dom", ops = list, calls });
         }
     }
 
@@ -531,6 +539,10 @@ internal sealed class WebHostClient : IDisposable
     private const string DomFlushMarker = "\u0001dom";
 
     private readonly object _stateLock = new();
+    private bool _domFlushQueued;
+    private readonly List<DomCall> _pendingCalls = new();
+    private bool _domFlushQueued;
+    private readonly List<DomCall> _pendingCalls = new();
     private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
     private readonly Dictionary<(char, string, string), DomOp> _domPending = new();
     private readonly HashSet<(char, string, string)> _domSeen = new();
@@ -567,3 +579,5 @@ internal sealed class WebHostClient : IDisposable
     private volatile string? _errorMessage;
     private volatile string? _loadError;
 }
+
+
