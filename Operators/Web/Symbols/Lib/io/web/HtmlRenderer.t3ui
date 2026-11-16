@@ -46,6 +46,14 @@
       }
     },
     {
+      "InputId": "17a2748d-b519-4b08-aac2-fafe6b02e89d"/*SyncToTiXLTime*/,
+      "Position": {
+        "X": -200.0,
+        "Y": 360.0
+      },
+      "Description": "Drives the page clock (requestAnimationFrame, timers, performance.now, Date.now, CSS/Web/SVG animations) from TiXL's animation time. Switch off to let the page run on its own clock."
+    },
+    {
       "InputId": "e577b060-f80d-4f22-ae82-b9a1691ce481"/*Modifiers*/,
       "Position": {
         "X": -200.0,

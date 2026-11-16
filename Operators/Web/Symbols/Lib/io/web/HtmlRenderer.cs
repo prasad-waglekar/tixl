@@ -5,10 +5,6 @@ using T3.Core.Utils;
 
 namespace Lib.io.web;
 
-/// <summary>
-/// Renders an HTML/CSS/JS/SVG project with an off-screen Chromium (CEF) into a texture.
-/// The browser runs in a separate helper process (TixlWebHost, see /WebHost); this operator only talks to it.
-/// </summary>
 [Guid("85f3298e-9f3c-4a78-8678-1caa9a3e12c1")]
 public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 {
@@ -31,6 +27,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         var fps = Math.Clamp(Fps.GetValue(context), 1, 240);
         var transparent = Transparent.GetValue(context);
         var paused = Paused.GetValue(context);
+        var syncTime = SyncToTiXLTime.GetValue(context);
 
         var reloadTriggered = MathUtils.WasTriggered(Reload.GetValue(context), ref _reloadState);
         if (reloadTriggered)
@@ -39,7 +36,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         var width = PickSize(resolution.Width, context.RequestedResolution.Width);
         var height = PickSize(resolution.Height, context.RequestedResolution.Height);
 
-        // Reload also restarts a crashed host or retries after a failed start.
         if (reloadTriggered && (_startFailed || (_client?.HostExited ?? false)))
         {
             DisposeClient();
@@ -74,11 +70,12 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         var nowMs = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
-        if (_sessionUrl != url || _sessionTransparent != transparent)
+        if (_sessionUrl != url || _sessionTransparent != transparent || _sessionSyncTime != syncTime)
         {
-            _client.Open(url, width, height, fps, transparent);
+            _client.Open(url, width, height, fps, transparent, syncTime);
             _sessionUrl = url;
             _sessionTransparent = transparent;
+            _sessionSyncTime = syncTime;
             _appliedWidth = width;
             _appliedHeight = height;
             _appliedFps = fps;
@@ -87,7 +84,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
         }
         else
         {
-            // Throttle continuous slider scrubs so rapid drags do not flood the host.
             var canSendSettings = (nowMs - _lastSettingsSendMs) >= 50.0;
 
             if ((width != _appliedWidth || height != _appliedHeight) && canSendSettings)
@@ -115,10 +111,11 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
             _appliedPaused = paused;
         }
 
-        _client.SetTime(context.LocalTime);
+        if (syncTime)
+            _client.SetTime(context.LocalTime);
+
         IsReady.Value = _client.IsFullyLoaded;
 
-        // Collect and send connected DOM/CSS modifier operators (CssColor, CssNumber, etc.)
         CollectModifiers(context);
         _client.SetDomOps(_domScope.Ops, _domScope.Calls);
 
@@ -147,8 +144,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
             var dataBox = new SharpDX.DataBox(frame.Data, frame.Stride, 0);
             ResourceManager.Device.ImmediateContext.UpdateSubresource(dataBox, _texture, 0);
-
-            _ = _client.IsFrameStillValid(frame);
         }
 
         Texture.Value = _texture;
@@ -157,7 +152,6 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private void CollectModifiers(EvaluationContext context)
     {
         _domScope.Ops.Clear();
-        _domScope.Calls.Clear();
         _domScope.Calls.Clear();
 
         context.ObjectVariables.TryGetValue(WebDomOps.ContextKey, out var previous);
@@ -236,62 +230,43 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
     protected override void Dispose(bool isDisposing)
     {
-        if (!isDisposing)
-            return;
-
+        if (!isDisposing) return;
         DisposeClient();
         _texture?.Dispose();
         _texture = null;
     }
 
-    #region status
     public IStatusProvider.StatusLevel GetStatusLevel() => GetStatus().Level;
     public string? GetStatusMessage() => GetStatus().Message;
 
     private (IStatusProvider.StatusLevel Level, string? Message) GetStatus()
     {
-        if (_inputError != null)
-            return (IStatusProvider.StatusLevel.Warning, _inputError);
-
-        if (_startError != null)
-            return (IStatusProvider.StatusLevel.Error, _startError);
+        if (_inputError != null) return (IStatusProvider.StatusLevel.Warning, _inputError);
+        if (_startError != null) return (IStatusProvider.StatusLevel.Error, _startError);
 
         var client = _client;
-        if (client == null)
-            return (IStatusProvider.StatusLevel.Success, null);
+        if (client == null) return (IStatusProvider.StatusLevel.Success, null);
 
-        if (client.ErrorMessage != null)
-            return (IStatusProvider.StatusLevel.Error, client.ErrorMessage + " Toggle Reload to restart.");
+        if (client.ErrorMessage != null) return (IStatusProvider.StatusLevel.Error, client.ErrorMessage + " Toggle Reload to restart.");
+        if (client.LoadError != null) return (IStatusProvider.StatusLevel.Error, client.LoadError);
+        if (client.MissingSelectors is { } missing) return (IStatusProvider.StatusLevel.Warning, "No element matches: " + missing);
 
-        if (client.LoadError != null)
-            return (IStatusProvider.StatusLevel.Error, client.LoadError);
-
-        if (client.MissingSelectors is { } missing)
-            return (IStatusProvider.StatusLevel.Warning, "No element matches: " + missing);
-
-        if (!client.IsConnected)
-            return (IStatusProvider.StatusLevel.Notice, "Starting browser host...");
-
-        if (client.IsLoading)
-            return (IStatusProvider.StatusLevel.Notice, "Loading...");
-
-        if (!client.HasFrame)
-            return (IStatusProvider.StatusLevel.Notice, "Waiting for the first frame...");
+        if (!client.IsConnected) return (IStatusProvider.StatusLevel.Notice, "Starting browser host...");
+        if (client.IsLoading) return (IStatusProvider.StatusLevel.Notice, "Loading...");
+        if (!client.HasFrame) return (IStatusProvider.StatusLevel.Notice, "Waiting for the first frame...");
 
         return (IStatusProvider.StatusLevel.Success, null);
     }
-    #endregion
 
     private WebHostClient? _client;
     private Texture2D? _texture;
-
     private bool _reloadState;
     private bool _startFailed;
     private string? _startError;
     private string? _inputError;
-
     private string? _sessionUrl;
     private bool _sessionTransparent;
+    private bool _sessionSyncTime;
     private readonly WebDomOps _domScope = new();
     private int _appliedWidth;
     private int _appliedHeight;
@@ -299,26 +274,12 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
     private bool _appliedPaused;
     private double _lastSettingsSendMs;
 
-    [Input(Guid = "3ce7bcaa-3230-41ee-a0dc-601862139ce9")]
-    public readonly InputSlot<string> Path = new();
-
-    [Input(Guid = "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9")]
-    public readonly InputSlot<Int2> Resolution = new();
-
-    [Input(Guid = "c70c8d20-ef5b-4dac-b395-9f1f00dbc633")]
-    public readonly InputSlot<int> Fps = new();
-
-    [Input(Guid = "a6319d66-550a-4ac0-88b0-86a22ec411a4")]
-    public readonly InputSlot<bool> Transparent = new();
-
-    [Input(Guid = "364f1cab-d6f3-41b2-a78f-55e5c77873a2")]
-    public readonly InputSlot<bool> Paused = new();
-
-    [Input(Guid = "693a8174-cef1-42fc-95e2-3a8299169663")]
-    public readonly InputSlot<bool> Reload = new();
-
-    [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")]
-    public readonly MultiInputSlot<Command> Modifiers = new();
+    [Input(Guid = "3ce7bcaa-3230-41ee-a0dc-601862139ce9")] public readonly InputSlot<string> Path = new();
+    [Input(Guid = "5bbf805c-c7fa-4db5-b075-ee1a48ac78d9")] public readonly InputSlot<Int2> Resolution = new();
+    [Input(Guid = "c70c8d20-ef5b-4dac-b395-9f1f00dbc633")] public readonly InputSlot<int> Fps = new();
+    [Input(Guid = "a6319d66-550a-4ac0-88b0-86a22ec411a4")] public readonly InputSlot<bool> Transparent = new();
+    [Input(Guid = "364f1cab-d6f3-41b2-a78f-55e5c77873a2")] public readonly InputSlot<bool> Paused = new();
+    [Input(Guid = "693a8174-cef1-42fc-95e2-3a8299169663")] public readonly InputSlot<bool> Reload = new();
+    [Input(Guid = "17a2748d-b519-4b08-aac2-fafe6b02e89d")] public readonly InputSlot<bool> SyncToTiXLTime = new();
+    [Input(Guid = "e577b060-f80d-4f22-ae82-b9a1691ce481")] public readonly MultiInputSlot<Command> Modifiers = new();
 }
-
-

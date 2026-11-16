@@ -8,11 +8,6 @@ using System.Threading.Channels;
 
 namespace Lib.io.web;
 
-/// <summary>
-/// TiXL-side client of TixlWebHost (the out-of-process Chromium renderer, see /WebHost).
-/// Starts the host, communicates via an asynchronous named pipe, and reads rendered BGRA frames
-/// from a double-buffered memory-mapped file without blocking TiXL's evaluation loop.
-/// </summary>
 internal sealed class WebHostClient : IDisposable
 {
     public const string HostFileName = "TixlWebHost.exe";
@@ -29,7 +24,6 @@ internal sealed class WebHostClient : IDisposable
     public string? MissingSelectors => _missingSelectors == "[]" ? null : _missingSelectors;
     public bool HasFrame => _lastCounter > 0;
 
-    /// <summary>Looks for the host in %TIXL_WEBHOST% (file or folder), then %LOCALAPPDATA%\TiXL\WebHost.</summary>
     public static string? FindHostExecutable()
     {
         var env = Environment.GetEnvironmentVariable("TIXL_WEBHOST");
@@ -93,9 +87,7 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
-    // ---- non-blocking outbound commands ----
-
-    public void Open(string url, int width, int height, int fps, bool transparent)
+    public void Open(string url, int width, int height, int fps, bool transparent, bool syncTime)
     {
         lock (_stateLock)
         {
@@ -104,6 +96,7 @@ internal sealed class WebHostClient : IDisposable
             _height = height;
             _fps = fps;
             _transparent = transparent;
+            _syncTime = syncTime;
             _paused = false;
             _hasOpen = true;
             _isLoading = true;
@@ -162,7 +155,7 @@ internal sealed class WebHostClient : IDisposable
         }
     }
 
-    public void SetDomOps(List<DomOp> ops)
+    public void SetDomOps(List<DomOp> ops, List<DomCall> calls)
     {
         var changed = false;
         lock (_stateLock)
@@ -198,8 +191,17 @@ internal sealed class WebHostClient : IDisposable
                 }
             }
 
-            if (changed)
-                EnqueueCommand(DomFlushMarker);
+            if (calls.Count > 0)
+            {
+                _pendingCalls.AddRange(calls);
+                changed = true;
+            }
+
+            if ((changed || _domPending.Count > 0 || _pendingCalls.Count > 0) && !_domFlushQueued)
+            {
+                if (_outbound.Writer.TryWrite(DomFlushMarker))
+                    _domFlushQueued = true;
+            }
         }
     }
 
@@ -247,8 +249,6 @@ internal sealed class WebHostClient : IDisposable
         _outbound.Writer.TryWrite(json);
     }
 
-    // ---- frames (call from the operator's update thread only) ----
-
     public unsafe bool TryGetFrame(out FrameInfo frame)
     {
         frame = default;
@@ -285,8 +285,6 @@ internal sealed class WebHostClient : IDisposable
         return view != null && Volatile.Read(ref *(long*)view.Base) < frame.Counter + 2;
     }
 
-    // ---- background send / receive loops ----
-
     private async Task SendLoop(StreamWriter writer, CancellationToken ct)
     {
         try
@@ -301,14 +299,8 @@ internal sealed class WebHostClient : IDisposable
                 await writer.FlushAsync(ct).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
-        {
-            // expected on dispose
-        }
-        catch (Exception e) when (!_disposed)
-        {
-            SetError($"Could not send command to browser host: {e.Message}");
-        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (!_disposed) { SetError($"Could not send command to browser host: {e.Message}"); }
     }
 
     private async Task ReceiveLoop()
@@ -325,13 +317,8 @@ internal sealed class WebHostClient : IDisposable
 
             lock (_stateLock)
             {
-                while (_outbound.Reader.TryRead(out _))
-                {
-                }
-
-                if (_hasOpen)
-                    _outbound.Writer.TryWrite(BuildOpenJsonLocked());
-
+                while (_outbound.Reader.TryRead(out _)) { }
+                if (_hasOpen) _outbound.Writer.TryWrite(BuildOpenJsonLocked());
                 ResendAllDomLocked();
             }
 
@@ -342,35 +329,22 @@ internal sealed class WebHostClient : IDisposable
             using var reader = new StreamReader(_pipe, utf8, false, 4096, leaveOpen: true);
             while (!_disposed && await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
-                try
-                {
-                    HandleMessage(line);
-                }
-                catch (Exception e)
-                {
-                    Log.Warning($"[web] Could not handle host message: {e.Message}");
-                }
+                try { HandleMessage(line); }
+                catch (Exception e) { Log.Warning($"[web] Could not handle host message: {e.Message}"); }
             }
         }
         catch (OperationCanceledException)
         {
-            if (!_disposed)
-                SetError("The browser host did not connect in time. Check %TEMP%\\TixlWebHost for logs.");
+            if (!_disposed) SetError("The browser host did not connect in time. Check %TEMP%\\TixlWebHost for logs.");
         }
-        catch (Exception e) when (!_disposed)
-        {
-            SetError($"Connection to the browser host lost: {e.Message}");
-        }
+        catch (Exception e) when (!_disposed) { SetError($"Connection to the browser host lost: {e.Message}"); }
         finally
         {
             _isConnected = false;
             if (sendCts != null)
             {
                 sendCts.Cancel();
-                if (sendTask != null)
-                {
-                    try { await sendTask.ConfigureAwait(false); } catch { }
-                }
+                if (sendTask != null) { try { await sendTask.ConfigureAwait(false); } catch { } }
                 sendCts.Dispose();
             }
         }
@@ -383,41 +357,21 @@ internal sealed class WebHostClient : IDisposable
 
         switch (root.GetProperty("evt").GetString())
         {
-            case "frames":
-                OpenFrameView(root.GetProperty("name").GetString()!, root.GetProperty("slotSize").GetInt64());
-                break;
-
+            case "frames": OpenFrameView(root.GetProperty("name").GetString()!, root.GetProperty("slotSize").GetInt64()); break;
             case "loading":
                 _isLoading = root.GetProperty("isLoading").GetBoolean();
-                if (_isLoading)
-                {
-                    _loadError = null;
-                    _isFullyLoaded = false;
-                }
+                if (_isLoading) { _loadError = null; _isFullyLoaded = false; }
                 break;
-
-            case "fullyLoaded":
-                _isFullyLoaded = true;
-                _isLoading = false;
-                break;
-
+            case "fullyLoaded": _isFullyLoaded = true; _isLoading = false; break;
             case "loadError":
                 _loadError = $"{root.GetProperty("text").GetString()} ({root.GetProperty("code").GetInt32()}): {root.GetProperty("url").GetString()}";
                 Log.Warning($"[web] Load error: {_loadError}");
                 break;
-
             case "console":
-                Log.Debug($"[web] {root.GetProperty("level").GetString()}: {root.GetProperty("message").GetString()} " +
-                          $"({root.GetProperty("source").GetString()}:{root.GetProperty("line").GetInt32()})");
+                Log.Debug($"[web] {root.GetProperty("level").GetString()}: {root.GetProperty("message").GetString()} ({root.GetProperty("source").GetString()}:{root.GetProperty("line").GetInt32()})");
                 break;
-
-            case "domMissing":
-                _missingSelectors = root.GetProperty("missing").GetString();
-                break;
-
-            case "error":
-                SetError(root.GetProperty("message").GetString() ?? "Unknown browser host error.");
-                break;
+            case "domMissing": _missingSelectors = root.GetProperty("missing").GetString(); break;
+            case "error": SetError(root.GetProperty("message").GetString() ?? "Unknown browser host error."); break;
         }
     }
 
@@ -432,8 +386,7 @@ internal sealed class WebHostClient : IDisposable
         }
         catch (Exception e)
         {
-            accessor?.Dispose();
-            mmf?.Dispose();
+            accessor?.Dispose(); mmf?.Dispose();
             SetError($"Could not open shared frame memory: {e.Message}");
             return;
         }
@@ -442,19 +395,10 @@ internal sealed class WebHostClient : IDisposable
         accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
         var view = new FrameView(mmf, accessor, pointer + accessor.PointerOffset);
 
-        if (_disposed)
-        {
-            view.Dispose();
-            return;
-        }
+        if (_disposed) { view.Dispose(); return; }
 
         FrameView? replaced;
-        lock (_frameLock)
-        {
-            replaced = _pendingView;
-            _pendingView = view;
-        }
-
+        lock (_frameLock) { replaced = _pendingView; _pendingView = view; }
         replaced?.Dispose();
     }
 
@@ -462,9 +406,7 @@ internal sealed class WebHostClient : IDisposable
     {
         _hostExited = true;
         _isConnected = false;
-        if (_disposed)
-            return;
-
+        if (_disposed) return;
         var code = -1;
         try { code = _process?.ExitCode ?? -1; } catch { }
         SetError($"The browser host exited unexpectedly (exit code {code}). Check %TEMP%\\TixlWebHost for logs.");
@@ -477,13 +419,11 @@ internal sealed class WebHostClient : IDisposable
     }
 
     private string BuildOpenJsonLocked()
-        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused });
+        => JsonSerializer.Serialize(new { cmd = "open", url = _url, width = _width, height = _height, fps = _fps, transparent = _transparent, paused = _paused, syncTime = _syncTime });
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-
+        if (_disposed) return;
         _disposed = true;
         _outbound.Writer.TryWrite("{\"cmd\":\"close\"}");
         _outbound.Writer.TryComplete();
@@ -499,20 +439,14 @@ internal sealed class WebHostClient : IDisposable
 
         _currentView?.Dispose();
         _currentView = null;
-        lock (_frameLock)
-        {
-            _pendingView?.Dispose();
-            _pendingView = null;
-        }
+        lock (_frameLock) { _pendingView?.Dispose(); _pendingView = null; }
     }
 
     private sealed unsafe class FrameView : IDisposable
     {
         public FrameView(MemoryMappedFile mmf, MemoryMappedViewAccessor accessor, byte* basePointer)
         {
-            _mmf = mmf;
-            _accessor = accessor;
-            Base = basePointer;
+            _mmf = mmf; _accessor = accessor; Base = basePointer;
             Width = *(int*)(basePointer + 8);
             Height = *(int*)(basePointer + 12);
             Stride = *(int*)(basePointer + 16);
@@ -541,8 +475,6 @@ internal sealed class WebHostClient : IDisposable
     private readonly object _stateLock = new();
     private bool _domFlushQueued;
     private readonly List<DomCall> _pendingCalls = new();
-    private bool _domFlushQueued;
-    private readonly List<DomCall> _pendingCalls = new();
     private readonly Dictionary<(char, string, string), DomOp> _domDesired = new();
     private readonly Dictionary<(char, string, string), DomOp> _domPending = new();
     private readonly HashSet<(char, string, string)> _domSeen = new();
@@ -558,19 +490,17 @@ internal sealed class WebHostClient : IDisposable
 
     private NamedPipeServerStream? _pipe;
     private Process? _process;
-
     private FrameView? _pendingView;
     private FrameView? _currentView;
     private long _lastCounter;
-
     private string _url = "about:blank";
     private int _width = 1280;
     private int _height = 720;
     private int _fps = 60;
     private bool _transparent;
     private bool _paused;
+    private bool _syncTime;
     private bool _hasOpen;
-
     private volatile bool _isConnected;
     private volatile bool _isLoading;
     private volatile bool _isFullyLoaded;
@@ -579,5 +509,3 @@ internal sealed class WebHostClient : IDisposable
     private volatile string? _errorMessage;
     private volatile string? _loadError;
 }
-
-
