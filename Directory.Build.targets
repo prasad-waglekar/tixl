@@ -1,11 +1,7 @@
-<!-- SolutionRoot\Directory.Build.targets -->
 <Project>
-  <!-- Packages like Microsoft.ML.OnnxRuntime ship Android/iOS native blobs (~110 MB) under runtimes/.
-       TiXL never runs there, but the SDK copies them into every output folder that references the package. -->
-  <Target Name="ExcludeMobileNativeRuntimes" AfterTargets="ResolvePackageAssets">
-    <ItemGroup>
-      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
-                                    Condition="'%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'android' Or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'ios'" />
-    </ItemGroup>
+  <!-- Automatically deploys TixlWebHost alongside TiXL build outputs so manual install.ps1 runs aren't required during development -->
+  <Target Name="DeployTixlWebHost" AfterTargets="Build" Condition="Exists('$(MSBuildThisFileDirectory)WebHost\TixlWebHost.csproj') and '$(MSBuildProjectName)' != 'TixlWebHost'">
+    <Message Text="Deploying TixlWebHost ($(Configuration)) to %LOCALAPPDATA%\TiXL\WebHost..." Importance="high" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)WebHost\TixlWebHost.csproj&quot; -c $(Configuration) -o &quot;$(LocalAppData)\TiXL\WebHost&quot; --nologo" />
   </Target>
 </Project>

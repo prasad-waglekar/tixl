@@ -58,6 +58,8 @@ internal static unsafe class Program
 
         if (_pipeName.Length == 0) return 2;
 
+        CleanupStaleCaches();
+
         try
         {
             var logDir = Path.Combine(Path.GetTempPath(), "TixlWebHost");
@@ -89,7 +91,7 @@ internal static unsafe class Program
             _writer = new StreamWriter(pipe, utf8, 1024, leaveOpen: true) { AutoFlush = true };
             var reader = new StreamReader(pipe, utf8, false, 4096, leaveOpen: true);
 
-            Send(new { evt = "ready" });
+            Send(new { evt = WebProtocol.Events.Ready });
             StartParentWatch(parentPid);
 
             var readerThread = new Thread(() => ReadLoop(reader)) { IsBackground = true, Name = "pipe-reader" };
@@ -104,6 +106,40 @@ internal static unsafe class Program
             Log("Fatal: " + e);
             try { Shutdown(); } catch { }
             return 1;
+        }
+    }
+
+    private static void CleanupStaleCaches()
+    {
+        try
+        {
+            var logDir = Path.Combine(Path.GetTempPath(), "TixlWebHost");
+            if (!Directory.Exists(logDir)) return;
+
+            var activePids = new HashSet<int>(Process.GetProcessesByName("TixlWebHost").Select(p => p.Id));
+
+            foreach (var dir in Directory.GetDirectories(logDir, "cache-*"))
+            {
+                var name = Path.GetFileName(dir);
+                if (name.Length > 6 && int.TryParse(name.AsSpan(6), out var pid) && !activePids.Contains(pid))
+                {
+                    try { Directory.Delete(dir, true); } catch { }
+                }
+            }
+
+            foreach (var file in Directory.GetFiles(logDir, "*.log"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                var dash = name.LastIndexOf('-');
+                if (dash > 0 && int.TryParse(name.AsSpan(dash + 1), out var pid) && !activePids.Contains(pid))
+                {
+                    try { File.Delete(file); } catch { }
+                }
+            }
+        }
+        catch
+        {
+            // best effort cleanup
         }
     }
 
@@ -169,7 +205,7 @@ internal static unsafe class Program
         var root = doc.RootElement.Clone();
         var cmd = root.GetProperty("cmd").GetString();
 
-        if (cmd == "close")
+        if (cmd == WebProtocol.Commands.Close)
         {
             _exit.Set();
             return;
@@ -186,7 +222,7 @@ internal static unsafe class Program
     {
         switch (cmd)
         {
-            case "open":
+            case WebProtocol.Commands.Open:
                 var url = root.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? "about:blank" : "about:blank";
                 var w = Dimension(GetInt(root, "width", 1280));
                 var h = Dimension(GetInt(root, "height", 720));
@@ -197,39 +233,39 @@ internal static unsafe class Program
                 Open(url, w, h, fps, trans, p, st);
                 break;
 
-            case "reload":
+            case WebProtocol.Commands.Reload:
                 _pageReady = false;
                 _browser?.Reload(true);
                 break;
 
-            case "dom":
+            case WebProtocol.Commands.Dom:
                 HandleDom(root);
                 break;
 
-            case "resize":
+            case WebProtocol.Commands.Resize:
                 var rw = Dimension(GetInt(root, "width", 1280));
                 var rh = Dimension(GetInt(root, "height", 720));
                 if (_browser != null)
                     _browser.Size = new Size(rw, rh);
                 break;
 
-            case "fps":
+            case WebProtocol.Commands.Fps:
                 var f = Math.Clamp(GetInt(root, "value", 60), 1, 240);
                 if (_browser?.GetBrowserHost() is { } host)
                     host.WindowlessFrameRate = f;
                 break;
 
-            case "pause":
+            case WebProtocol.Commands.Pause:
                 var pauseVal = GetBool(root, "value", false);
                 SetPaused(pauseVal);
                 break;
 
-            case "time":
+            case WebProtocol.Commands.Time:
                 var time = root.TryGetProperty("value", out var timeProp) ? timeProp.GetDouble() : 0.0;
                 SetTime(time * 1000.0);
                 break;
 
-            case "close":
+            case WebProtocol.Commands.Close:
                 _exit.Set();
                 break;
         }
@@ -288,7 +324,7 @@ internal static unsafe class Program
         browser.LoadingStateChanged += (_, e) =>
                                        {
                                            Log($"loading: {e.IsLoading}");
-                                           Send(new { evt = "loading", isLoading = e.IsLoading });
+                                           Send(new { evt = WebProtocol.Events.Loading, isLoading = e.IsLoading });
                                            if (e.IsLoading)
                                            {
                                                _pageReady = false;
@@ -301,7 +337,7 @@ internal static unsafe class Program
                              {
                                  if (e.ErrorCode == CefErrorCode.Aborted) return;
                                  Log($"load error {(int)e.ErrorCode} {e.ErrorText}: {e.FailedUrl}");
-                                 Send(new { evt = "loadError", code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
+                                 Send(new { evt = WebProtocol.Events.LoadError, code = (int)e.ErrorCode, text = e.ErrorText, url = e.FailedUrl });
                              };
         
         browser.FrameLoadStart += (_, e) =>
@@ -337,7 +373,7 @@ internal static unsafe class Program
                                       var now = Environment.TickCount64;
                                       var prev = Interlocked.Read(ref _lastConsoleSendTicks);
                                       if (now - prev < 50 || Interlocked.CompareExchange(ref _lastConsoleSendTicks, now, prev) != prev) return;
-                                      Send(new { evt = "console", level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
+                                      Send(new { evt = WebProtocol.Events.Console, level = e.Level.ToString(), message = e.Message, source = e.Source, line = e.Line });
                                   };
 
         lock (_gate) { _browser = browser; }
@@ -410,15 +446,15 @@ internal static unsafe class Program
                             if (changed && ReferenceEquals(browser, _browser))
                             {
                                 Log("selectors without a match: " + missing);
-                                Send(new { evt = "domMissing", missing });
+                                Send(new { evt = WebProtocol.Events.DomMissing, missing });
                             }
                         }
-                        catch (Exception e) { Send(new { evt = "error", message = "DOM update failed: " + e.Message }); }
+                        catch (Exception e) { Send(new { evt = WebProtocol.Events.Error, message = "DOM update failed: " + e.Message }); }
                     }, TaskScheduler.Default);
             }
             catch (Exception e)
             {
-                Send(new { evt = "error", message = "DOM update failed: " + e.Message });
+                Send(new { evt = WebProtocol.Events.Error, message = "DOM update failed: " + e.Message });
             }
         });
     }
@@ -460,7 +496,7 @@ internal static unsafe class Program
         }
 
         if (announce is { } a)
-            Send(new { evt = "frames", name = a.Name, width = a.Width, height = a.Height, slotSize = a.SlotSize });
+            Send(new { evt = WebProtocol.Events.Frames, name = a.Name, width = a.Width, height = a.Height, slotSize = a.SlotSize });
     }
 
     private static void AllocateSharedMemory(int width, int height)
@@ -513,6 +549,7 @@ internal static unsafe class Program
 
     private static void Shutdown()
     {
+        var cacheDir = Path.Combine(Path.GetTempPath(), "TixlWebHost", $"cache-{Environment.ProcessId}");
         try
         {
             Cef.UIThreadTaskFactory.StartNew(() =>
@@ -525,6 +562,7 @@ internal static unsafe class Program
         catch { }
 
         lock (_gate) ReleaseSharedMemory();
+        try { if (Directory.Exists(cacheDir)) Directory.Delete(cacheDir, true); } catch { }
     }
 
     private static void Send(object message)
