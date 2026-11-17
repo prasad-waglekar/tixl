@@ -72,13 +72,26 @@ internal static class DomHelper
             if (calls) {
               for (var k = 0; k < calls.length; k++) {
                 var fn = calls[k][0], raw = calls[k][1];
-                try {
-                  var f = window[fn];
-                  if (typeof f !== 'function') continue;
-                  var arg = raw;
-                  try { arg = raw === '' ? undefined : JSON.parse(raw); } catch (e) { }
-                  f(arg);
-                } catch (e) { }
+
+                // Resolve "name" or "object.method" on window. Functions declared with const/let are not properties of
+                // window; declare them with function name() {} or assign window.name = ... to make them callable.
+                var parts = String(fn).split('.');
+                var owner = window, target = window;
+                for (var q = 0; q < parts.length && target !== null && target !== undefined; q++) {
+                  owner = target;
+                  target = target[parts[q]];
+                }
+
+                if (typeof target !== 'function') {
+                  var noFunction = '(no function) ' + fn;
+                  if (missing.indexOf(noFunction) < 0) missing.push(noFunction);
+                  continue;
+                }
+
+                var arg = raw;
+                try { arg = raw === '' ? undefined : JSON.parse(raw); } catch (e) { }
+                try { target.call(owner, arg); }
+                catch (e) { try { console.error(fn + ': ' + (e && e.stack ? e.stack : e)); } catch (ignored) { } }
               }
             }
             return JSON.stringify(missing);

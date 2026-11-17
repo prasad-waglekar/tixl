@@ -1,4 +1,5 @@
 // TixlWebHost - out-of-process Chromium (CEF, off-screen) renderer for TiXL's Web operators.
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.MemoryMappedFiles;
@@ -33,6 +34,7 @@ internal static unsafe class Program
     private static (string Name, int Width, int Height, long SlotSize)? _announceFrames;
 
     private static readonly object _domLock = new();
+    private static readonly List<string> _pendingCalls = new(); // JavaScript calls that arrived while the page was loading
     private static readonly Dictionary<string, string> _domState = new();
     private static volatile bool _pageReady;
     private static string _lastMissing = "[]";
@@ -84,13 +86,14 @@ internal static unsafe class Program
             if (!InitializeCef()) { Log("CEF initialization failed."); return 3; }
             Log("CEF initialized.");
 
-            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.None);
+            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             pipe.Connect(15000);
 
             var utf8 = new UTF8Encoding(false);
             _writer = new StreamWriter(pipe, utf8, 1024, leaveOpen: true) { AutoFlush = true };
             var reader = new StreamReader(pipe, utf8, false, 4096, leaveOpen: true);
 
+            new Thread(WriterLoop) { IsBackground = true, Name = "pipe-writer" }.Start();
             Send(new { evt = WebProtocol.Events.Ready });
             StartParentWatch(parentPid);
 
@@ -307,6 +310,7 @@ internal static unsafe class Program
         lock (_domLock)
         {
             _domState.Clear();
+            _pendingCalls.Clear();
             _lastMissing = "[]";
         }
 
@@ -402,6 +406,15 @@ internal static unsafe class Program
             var callsJson = root.TryGetProperty("calls", out var c) ? c.GetRawText() : "[]";
             ApplyDomAsync(_browser, opsJson, callsJson);
         }
+        else if (root.TryGetProperty("calls", out var queued))
+        {
+            // The page is still loading: keep the calls and run them as soon as it is ready.
+            lock (_domLock)
+            {
+                foreach (var call in queued.EnumerateArray())
+                    _pendingCalls.Add(call.GetRawText());
+            }
+        }
     }
 
     private static void PageLoaded(ChromiumWebBrowser browser)
@@ -413,8 +426,16 @@ internal static unsafe class Program
         _pageReady = true;
 
         string all;
-        lock (_domLock) all = _domState.Count == 0 ? "" : "[" + string.Join(",", _domState.Values) + "]";
-        if (all.Length > 0) ApplyDomAsync(browser, all, "[]");
+        string calls;
+        lock (_domLock)
+        {
+            all = _domState.Count == 0 ? "[]" : "[" + string.Join(",", _domState.Values) + "]";
+            calls = _pendingCalls.Count == 0 ? "[]" : "[" + string.Join(",", _pendingCalls) + "]";
+            _pendingCalls.Clear();
+        }
+
+        if (all != "[]" || calls != "[]")
+            ApplyDomAsync(browser, all, calls);
     }
 
     private static void ApplyDomAsync(ChromiumWebBrowser browser, string opsJson, string callsJson)
@@ -565,13 +586,33 @@ internal static unsafe class Program
         try { if (Directory.Exists(cacheDir)) Directory.Delete(cacheDir, true); } catch { }
     }
 
+    // Messages go through a queue and their own thread: the CEF UI thread (paint, load events) must never wait for the pipe.
+    private static readonly BlockingCollection<string> _outbox = new(4096);
+
     private static void Send(object message)
     {
-        var json = JsonSerializer.Serialize(message);
-        lock (_writeLock)
+        try
         {
-            try { _writer?.WriteLine(json); }
-            catch (IOException) { _exit.Set(); }
+            if (!_outbox.TryAdd(JsonSerializer.Serialize(message)))
+                Log("Outgoing queue is full; a message was dropped.");
+        }
+        catch (InvalidOperationException)
+        {
+            // shutting down
+        }
+    }
+
+    private static void WriterLoop()
+    {
+        try
+        {
+            foreach (var json in _outbox.GetConsumingEnumerable())
+                _writer?.WriteLine(json);
+        }
+        catch (Exception e)
+        {
+            Log("Pipe write failed: " + e.Message);
+            _exit.Set();
         }
     }
 

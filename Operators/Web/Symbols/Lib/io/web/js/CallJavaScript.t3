@@ -3,7 +3,9 @@
   "Id": "4f8b2d1e-7a3c-4e5b-9d6a-1b3d5f7a9c2e"/*CallJavaScript*/,
   "Inputs": [
     { "Id": "6b2f4a8c-0c5a-4b3d-9f7c-1e3a5b7d9f2c"/*Function*/, "DefaultValue": "" },
-    { "Id": "7c3a5b9d-1d6b-4c4e-a0d8-2f4a6c8e0a3d"/*Argument*/, "DefaultValue": "" }
+    { "Id": "7c3a5b9d-1d6b-4c4e-a0d8-2f4a6c8e0a3d"/*Argument*/, "DefaultValue": "" },
+    { "Id": "ad616800-3557-47a1-a673-a8bd7a42ddea"/*Trigger*/, "DefaultValue": false },
+    { "Id": "41f3f415-f971-4df3-80b6-46c9fb249052"/*CallOnChange*/, "DefaultValue": true }
   ],
   "Children": [],
   "Connections": []

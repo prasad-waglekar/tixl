@@ -157,4 +157,16 @@
     </PropertyGroup>
     <WriteLinesToFile File="$(OutputPath)/OperatorPackage.json" Lines="$(OperatorPackageInfoJson)" Overwrite="True" Encoding="UTF-8" />
   </Target>
+
+  <!-- Keeps the browser host in %LOCALAPPDATA%\TiXL\WebHost up to date. It only runs when a WebHost source file is
+       newer than the installed TixlWebHost.dll, and a failure (for example because TiXL is running and the host executable
+       is locked) is only a warning. -->
+  <ItemGroup>
+    <WebHostSource Include="$(MSBuildThisFileDirectory)..\..\WebHost\*.cs;$(MSBuildThisFileDirectory)..\..\WebHost\WebHost.csproj" />
+  </ItemGroup>
+  <Target Name="DeployTixlWebHost" AfterTargets="Build" Inputs="@(WebHostSource)" Outputs="$(LocalAppData)\TiXL\WebHost\TixlWebHost.dll"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(MSBuildThisFileDirectory)..\..\WebHost\WebHost.csproj')">
+    <Message Text="Deploying TixlWebHost to $(LocalAppData)\TiXL\WebHost ..." Importance="high" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\WebHost\WebHost.csproj&quot; -c $(Configuration) -o &quot;$(LocalAppData)\TiXL\WebHost&quot; --nologo" ContinueOnError="true" />
+  </Target>
 </Project>

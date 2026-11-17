@@ -1,10 +1,12 @@
 ﻿{
   "FormatVersion": 3,
   "Id": "4f8b2d1e-7a3c-4e5b-9d6a-1b3d5f7a9c2e"/*CallJavaScript*/,
-  "Description": "Calls a JavaScript function exposed by the loaded page, e.g. window.play or window.setData. Fires when Function or Argument changes, not every frame. Connect to the Modifiers input of an HtmlRenderer.",
+  "Description": "Calls a JavaScript function exposed by the loaded page, e.g. window.play or window.setData. Fires when the Trigger input switches on, and, if CallOnChange is on, when Function or Argument changes (never every frame). Calls made while the page is still loading run once it has loaded. Connect to the Modifiers input of an HtmlRenderer.",
   "InputUis": [
-    { "InputId": "6b2f4a8c-0c5a-4b3d-9f7c-1e3a5b7d9f2c"/*Function*/, "Position": { "X": -200.0, "Y": 90.0 }, "Description": "Name of a function on the page's window object. Called as window[name](argument)." },
-    { "InputId": "7c3a5b9d-1d6b-4c4e-a0d8-2f4a6c8e0a3d"/*Argument*/, "Position": { "X": -200.0, "Y": 135.0 }, "Description": "Argument passed to the function. Parsed as JSON if possible, otherwise passed as a plain string." }
+    { "InputId": "6b2f4a8c-0c5a-4b3d-9f7c-1e3a5b7d9f2c"/*Function*/, "Position": { "X": -200.0, "Y": 90.0 }, "Description": "Name of a function on the page's window object, or a path like app.setColor. Declare it with function name() {} or window.name = ...; const/let functions are not on window and cannot be found." },
+    { "InputId": "7c3a5b9d-1d6b-4c4e-a0d8-2f4a6c8e0a3d"/*Argument*/, "Position": { "X": -200.0, "Y": 135.0 }, "Description": "Argument passed to the function. Parsed as JSON if possible, otherwise passed as a plain string." },
+    { "InputId": "ad616800-3557-47a1-a673-a8bd7a42ddea"/*Trigger*/, "Position": { "X": -200.0, "Y": 180.0 }, "Description": "Calls the function each time this switches from off to on (for example from a MIDI note or a button)." },
+    { "InputId": "41f3f415-f971-4df3-80b6-46c9fb249052"/*CallOnChange*/, "Position": { "X": -200.0, "Y": 225.0 }, "Description": "Also calls the function whenever Function or Argument changes, including once at start (after the page loaded)." }
   ],
   "SymbolChildUis": [],
   "OutputUis": [

@@ -260,7 +260,7 @@ public sealed class HtmlRenderer : Instance<HtmlRenderer>, IStatusProvider
 
         if (client.ErrorMessage != null) return (IStatusProvider.StatusLevel.Error, client.ErrorMessage + " Toggle Reload to restart.");
         if (client.LoadError != null) return (IStatusProvider.StatusLevel.Error, client.LoadError);
-        if (client.MissingSelectors is { } missing) return (IStatusProvider.StatusLevel.Warning, "No element matches: " + missing);
+        if (client.MissingSelectors is { } missing) return (IStatusProvider.StatusLevel.Warning, "Not found on the page: " + missing);
 
         if (!client.IsConnected) return (IStatusProvider.StatusLevel.Notice, "Starting browser host...");
         if (client.IsLoading) return (IStatusProvider.StatusLevel.Notice, "Loading...");
